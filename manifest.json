@@ -1,0 +1,10 @@
+{
+"domain": "sem",
+"name": "SEM",
+"version": "0.1.0",
+"config_flow": true,
+"documentation": "https://github.com/Henrik1986/sem-energy-manager",
+"requirements": [],
+"dependencies": [],
+"codeowners": []
+}
