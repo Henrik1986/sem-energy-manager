@@ -1,22 +1,15 @@
 from homeassistant import config_entries
 import voluptuous as vol
 
-from .const import DOMAIN
+DOMAIN = "sem"
 
 
 class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
-        if user_input is not None:
-            return await self.async_step_requirements()
 
-        return self.async_show_form(
-            step_id="user",
-            data_schema=vol.Schema({})
-        )
-
-    async def async_step_requirements(self, user_input=None):
         if user_input is not None:
             return self.async_create_entry(
                 title="SEM",
@@ -24,6 +17,6 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             )
 
         return self.async_show_form(
-            step_id="requirements",
+            step_id="user",
             data_schema=vol.Schema({})
         )
