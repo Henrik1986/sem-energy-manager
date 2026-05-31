@@ -3,7 +3,12 @@
     "step": {
       "user": {
         "title": "Välkommen till SEM",
-        "description": "SEM är ett energihanteringssystem för Home Assistant.\n\nInnan du fortsätter behöver din anläggning redan vara tillagd och korrekt konfigurerad i Home Assistant.\n\nSEM bygger ovanpå din befintliga installation och installerar inte din hårdvara åt dig.\n\nStödda system i denna version:\n- Huawei Solar (växelriktare och batteri via officiell eller HACS-integration)\n\nFör att fortsätta behöver du ha:\n- En fungerande växelriktare i Home Assistant\n- Tillgängliga energi- och batterisensorer"
+        "description": "Innan du fortsätter behöver dina solceller och batteri vara tillagda och korrekt konfigurerade i Home Assistant.\n\n"
+
+"Om din anläggning inte redan är konfigurerad måste detta göras först innan du fortsätter.\n\n"
+
+"Stödda system i denna version:\n"
+"- Huawei Solar (växelriktare och batteri via officiell eller HACS-integration)"
       },
       "requirements": {
         "title": "Kontrollerar systemkrav",
