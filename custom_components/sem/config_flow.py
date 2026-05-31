@@ -10,7 +10,6 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input=None):
 
-        # Första sidan (välkomstsida)
         if user_input is not None:
             return await self.async_step_smhi()
 
@@ -29,19 +28,15 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else "❌ SMHI saknas (skapa weather.smhi_home först)"
         )
 
-        # När användaren klickar vidare → skapa integration
         if user_input is not None:
             return self.async_create_entry(
                 title="SEM",
                 data={}
             )
 
-        # Viktigt: ge ett "fält" så HA faktiskt renderar en knapp
         return self.async_show_form(
             step_id="smhi",
-            data_schema=vol.Schema({
-                vol.Optional("confirm"): bool
-            }),
+            data_schema=vol.Schema({}),
             description_placeholders={
                 "status": smhi_status
             }
