@@ -5,9 +5,9 @@
         "title": "Välkommen till SEM",
         "description": "Innan du fortsätter behöver dina solceller och batteri vara tillagda och korrekt konfigurerade i Home Assistant.\n\nOm din anläggning inte redan är konfigurerad måste detta göras först innan du fortsätter.\n\nStödda system i denna version:\n- Huawei Solar: https://github.com/wlcrs/huawei_solar"
       },
-      "requirements": {
-        "title": "Kontrollerar systemkrav",
-        "description": "SEM kontrollerar att din Home Assistant-installation har de nödvändiga integrationerna och enheterna innan konfigurationen kan fortsätta."
+      "requirements_check": {
+        "title": "Kontrollerar installation",
+        "description": "{status}"
       }
     }
   }
