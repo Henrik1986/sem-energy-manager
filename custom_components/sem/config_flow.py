@@ -28,11 +28,11 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else "❌ SMHI saknas (skapa weather.smhi_home först)"
         )
 
-        # 🔁 Refresh-knapp
+        # Uppdatera (stanna kvar)
         if user_input and user_input.get("refresh"):
             return await self.async_step_smhi()
 
-        # ➡ Fortsätt till nästa steg
+        # Fortsätt
         if user_input and user_input.get("confirm"):
             return self.async_create_entry(
                 title="SEM",
@@ -41,11 +41,9 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="smhi",
-            data_schema=vol.Schema({
-                vol.Optional("refresh"): bool,
-                vol.Optional("confirm"): bool
-            }),
+            data_schema=vol.Schema({}),
             description_placeholders={
                 "status": smhi_status
-            }
+            },
+            submit_button_text="Fortsätt",
         )
