@@ -22,22 +22,22 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         smhi_loaded = self.hass.states.get("weather.smhi_home") is not None
 
-        smhi_status = (
+        status = (
             "✔ SMHI konfigurerad"
             if smhi_loaded
-            else "❌ SMHI saknas (skapa weather.smhi_home först)"
+            else "❌ SMHI saknas"
         )
 
+        # Refresh (klick på submit = reload step)
         if user_input is not None:
-            return self.async_create_entry(
-                title="SEM",
-                data={}
-            )
+            return await self.async_step_smhi()
 
         return self.async_show_form(
             step_id="smhi",
-            data_schema=vol.Schema({}),
+            data_schema=vol.Schema({
+                vol.Optional("refresh"): bool
+            }),
             description_placeholders={
-                "status": smhi_status
+                "status": status
             }
         )
