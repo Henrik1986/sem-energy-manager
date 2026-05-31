@@ -12,10 +12,9 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return await self.async_step_requirements_check()
 
-
     async def async_step_requirements_check(self, user_input=None):
 
-        smhi_loaded = "sensor.smhi_weather" in self.hass.states
+        smhi_loaded = self.hass.states.get("sensor.smhi_weather") is not None
 
         if user_input is not None:
             return self.async_create_entry(
