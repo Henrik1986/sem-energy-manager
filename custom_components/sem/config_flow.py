@@ -5,7 +5,6 @@ from .const import DOMAIN
 
 class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
-```
 VERSION = 1
 
 async def async_step_user(self, user_input=None):
@@ -30,4 +29,3 @@ async def async_step_requirements(self, user_input=None):
         step_id="requirements",
         data_schema=vol.Schema({})
     )
-```
