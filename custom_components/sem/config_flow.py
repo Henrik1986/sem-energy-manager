@@ -28,7 +28,7 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else "❌ SMHI saknas"
         )
 
-        # Refresh (klick på submit = reload step)
+        # refresh (submit = reload)
         if user_input is not None:
             return await self.async_step_smhi()
 
