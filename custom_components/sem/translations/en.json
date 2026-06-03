@@ -3,10 +3,34 @@
     "step": {
       "user": {
         "title": "Välkommen till SEM",
-        "description": "Innan du fortsätter behöver dina solceller och batteri vara tillagda och korrekt konfigurerade i Home Assistant.\n\nOm din anläggning inte redan är konfigurerad måste detta göras först innan du fortsätter.\n\nStödda system i denna version:\n- Huawei Solar: https://github.com/wlcrs/huawei_solar"
+        "description": "Innan du fortsätter behöver dina solceller och batteri vara tillagda och korrekt konfigurerade i Home Assistant.\n\nOm din anläggning inte redan är konfigurerad måste detta göras först innan du fortsätter. Eftersom du kommer att installera komponenter från HACS är det bra att ha två fönster öppna: ett för installationen av SEM och ett för installation av de komponenter som behövs.\n\nStödda system i denna version:\n- Huawei Solar: https://github.com/wlcrs/huawei_solar"
+      },
+      "hacs": {
+        "title": "Installera komponenter från HACS",
+        "description": "{status}"
+      },
+      "nordpool": {
+        "title": "Nordpool",
+        "description": "{status}"
       },
       "smhi": {
-        "title": "SMHI kontroll",
+        "title": "Konfiguera SMHI",
+        "description": "{status}"
+      },
+      "ai": {
+        "title": "Valfritt: AI-assistent",
+        "description": "{status}"
+      },
+      "yaml_setup": {
+        "title": "Konfiguration i configuration.yaml",
+        "description": "{status}"
+      },
+      "install": {
+        "title": "Installera SEM",
+        "description": "{status}"
+      },
+      "finish": {
+        "title": "Installationen är klar",
         "description": "{status}"
       }
     }
