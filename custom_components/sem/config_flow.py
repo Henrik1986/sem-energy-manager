@@ -50,9 +50,9 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         nordpool_ok = nordpool_exists()
 
         status = (
-            "✔ Nordpool hittad."
+            "✅ Nordpool hittad."
             if nordpool_ok
-            else "❌ Installera Nordpool + skapa sensor innan du fortsätter."
+            else "❌ Installera och konfiguerar Nordpool innan du fortsätter."
         )
 
         if user_input is not None:
@@ -67,7 +67,7 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_show_form(
                     step_id="nordpool",
                     data_schema=vol.Schema({}),
-                    description_placeholders={"status": "✔ Nordpool OK. Klicka igen."}
+                    description_placeholders={"status": "✅ Nordpool OK. Klicka bekräfta igen för att fortsätta."}
                 )
 
             return self.async_show_form(
@@ -306,7 +306,7 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={
                 "status": (
                     "Redo att installera SEM.\n\n"
-                    "Detta kommer:\n"
+                    "Nu görs följande:\n"
                     "- Ladda ner paket\n"
                     "- Installera backend\n"
                     "- Installera dashboards\n"
@@ -329,17 +329,17 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "🎉 Installationen är klar!\n\n"
             "SEM är nu installerat och redo att konfigureras.\n\n"
             "För att komma igång:\n"
-            "1. Öppna dashboarden 'Energisystem' i menyn till vänster.\n"
-            "2. Klicka på 'Mitt system' högst upp på sidan.\n"
-            "3. Klicka på 'Konfigurera' och följ anvisningarna.\n\n"
+            "1. Öppna dashboarden Energisystem i menyn till vänster.\n"
+            "2. Klicka på Mitt system högst upp på sidan.\n"
+            "3. Klicka på Konfigurera och följ anvisningarna.\n\n"
             "────────────────────────────\n\n"
             "🔄 Uppdateringar\n\n"
             "Framtida uppdateringar av SEM hanteras direkt från dashboarden.\n"
-            "Öppna 'Mitt system' och klicka på uppdateringsknappen.\n"
+            "Öppna Mitt system och klicka på uppdateringsknappen.\n"
             "När uppdateringen är klar startar du om Home Assistant.\n\n"
             "────────────────────────────\n\n"
             "🔑 Licens och demoperiod\n\n"
-            "Licens ansöks via 'Mitt system'.\n"
+            "Licens ansöks via Mitt system.\n"
             "Alla nya användare får 30 dagars demo."
         )
 
