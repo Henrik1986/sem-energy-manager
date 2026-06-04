@@ -1,12 +1,12 @@
 {
-"domain": "sem",
-"name": "SEM",
-"version": "0.1.0",
-"config_flow": true,
-"iot_class": "calculated",
-"documentation": "https://github.com/henrik1986/sem-energy-manager",
-"issue_tracker": "https://github.com/henrik1986/sem-energy-manager/issues",
-"requirements": [],
-"dependencies": [],
-"codeowners": ["@henrik1986"]
+  "domain": "sem",
+  "name": "SEM",
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/henrik1986/sem-energy-manager",
+  "codeowners": ["@henrik1986"],
+  "iot_class": "calculated",
+  "issue_tracker": "https://github.com/henrik1986/sem-energy-manager/issues",
+  "requirements": [],
+  "version": "0.1.0"
 }
