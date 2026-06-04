@@ -50,12 +50,24 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         nordpool_ok = nordpool_exists()
 
         status = (
-            "✅ Nordpool hittad."
+            "🟡 Nordpool integration hittad.\n\n" 
+            "Klicka på bekräfta för att validera din sensor."
             if nordpool_ok
-            else "❌ Installera och konfiguerar Nordpool innan du fortsätter."
+            else (
+                "🔴 Hittar ingen Nordpool integration\n\n\n"
+                "1. Hämta Nordpool via HACS och starta om Home Assistant.\n" 
+                "2. Installera och konfiguera Nordpool integrationen i Home Assistant. Din sensor ska visa elpriset i SEK/kWh.\n"
+                "(Inställningar → Enheter & tjänster → Lägg till integration)\n"
+                "3. Starta om SEM-installationen för att fortsätta installationen.\n\n\n"
+                "OBS! Bocka i rutan nedan om du använder den officiella Nordpool integrationen från Home Assistant.\n"
+                "https://www.home-assistant.io/integrations/nordpool/"
+            )
         )
 
         if user_input is not None:
+
+            if user_input.get("official_nordpool_installed"):
+                return await self.async_step_hacs()
 
             if nordpool_ok:
 
@@ -67,7 +79,12 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_show_form(
                     step_id="nordpool",
                     data_schema=vol.Schema({}),
-                    description_placeholders={"status": "✅ Nordpool OK. Klicka bekräfta igen för att fortsätta."}
+                    description_placeholders={
+                        "status": (
+                            "🟢 Nordpool sensor är validerad och godkänd.\n\n"
+                            "Klicka på bekräfta för att fortsätta installationen."
+                        )
+                    }
                 )
 
             return self.async_show_form(
@@ -78,7 +95,12 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="nordpool",
-            data_schema=vol.Schema({}),
+            data_schema=vol.Schema({
+                vol.Optional(
+                    "official_nordpool_installed",
+                    default=False
+                ): bool
+            }),
             description_placeholders={"status": status}
         )
 
@@ -96,9 +118,35 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         energy_ok = check("/config/www/community/energy-flow-card-plus")
         bubble_ok = check("/config/www/community/Bubble-Card")
 
-        all_ok = apex_ok and layout_ok and vertical_ok and energy_ok and bubble_ok
+        missing = []
 
-        status = "✔ HACS OK." if all_ok else "❌ Saknade HACS-komponenter"
+        if not apex_ok:
+            missing.append("• ApexCharts Card")
+
+        if not layout_ok:
+            missing.append("• Lovelace Layout Card")
+
+        if not vertical_ok:
+            missing.append("• Vertical Stack In Card")
+
+        if not energy_ok:
+            missing.append("• Energy Flow Card Plus")
+
+        if not bubble_ok:
+            missing.append("• Bubble Card")
+
+        all_ok = len(missing) == 0
+
+        status = (
+            "🟡 Nödvändiga HACS-integrationer hittade.\n\n" 
+            "Klicka på bekräfta för att validera dina integrationer."
+            if all_ok
+            else (
+                "🔴 Följande HACS-integrationer saknas:\n\n"
+                + "\n".join(missing)
+                + "\n\nInstallera dessa via HACS innan du fortsätter."
+            )
+        )
 
         if user_input is not None:
 
@@ -112,7 +160,12 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_show_form(
                     step_id="hacs",
                     data_schema=vol.Schema({}),
-                    description_placeholders={"status": "✔ HACS OK. Klicka igen."}
+                    description_placeholders={
+                        "status": (
+                            "🟢 HACS-integrationerna är validerade och godkända.\n\n"
+                            "Klicka på bekräfta för att fortsätta installationen."
+                        )
+                    }
                 )
 
             return self.async_show_form(
@@ -137,7 +190,15 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         smhi_ok = smhi_exists()
 
-        status = "✔ SMHI OK." if smhi_ok else "❌ weather.smhi_home saknas"
+        status = (
+            "🟡 SMHI-integrationen och vädersensor hittad.\n\n" 
+            "Klicka på bekräfta för att validera integrationen och vädersensorn."
+            if smhi_ok
+            else (
+                "🔴 SMHI-integrationen är inte tillgänglig eller inte korrekt konfigurerad.\n\n"
+                "Systemet kräver att du har en vädersensor med namnet weather.smhi_home."
+            )
+        )
 
         if user_input is not None:
 
@@ -151,7 +212,12 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 return self.async_show_form(
                     step_id="smhi",
                     data_schema=vol.Schema({}),
-                    description_placeholders={"status": "✔ SMHI OK. Klicka igen."}
+                    description_placeholders={
+                        "status": (
+                            "🟢 SMHI-integrationen och vädersensorn är validerad och godkänd.\n\n"
+                            "Klicka på bekräfta för att fortsätta installationen."
+                        )
+                    }
                 )
 
             return self.async_show_form(
@@ -179,10 +245,12 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({}),
             description_placeholders={
                 "status": (
-                    "Valfritt steg.\n\n"
-                    "- Google AI (gratis)\n"
-                    "- OpenAI (kostnad)\n"
-                    "Systemet fungerar utan detta steg."
+                    "🤖✨ AI-agent\n\n"
+                    "Systemet fungerar även utan AI, men med AI-analys kan styrningen bli mer träffsäker och tydlig. Du kan alltid lägga till en AI-agent senare i systemet.\n\n"
+                    "- Google AI (gratis och något ostabil)\n" 
+                    "https://www.home-assistant.io/integrations/google_generative_ai_conversation/\n\n"
+                    "- OpenAI (kostar och stabil) \n"
+                    "https://www.home-assistant.io/integrations/openai_conversation/"
                 )
             }
         )
@@ -305,11 +373,12 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema({}),
             description_placeholders={
                 "status": (
-                    "Redo att installera SEM.\n\n"
-                    "Nu görs följande:\n"
-                    "- Ladda ner paket\n"
-                    "- Installera backend\n"
-                    "- Installera dashboards\n"
+                    "⚙️ Vi är redo att installera systemet\n\n"
+                    "I detta steg kommer installationen att:\n"
+                    "- Ladda ner filer till din enhet\n"
+                    "- Installera systemets logik och automatik\n"
+                    "- Installera kontrollpanelen\n\n"
+                    "Klicka på bekräfta för att starta installationen av systemet."
                 )
             }
         )
@@ -320,27 +389,40 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_finish(self, user_input=None):
 
         if user_input is not None:
-            return self.async_create_entry(
+
+            entry = self.async_create_entry(
                 title="SEM",
                 data={"installed": True}
             )
 
+            self.hass.async_create_task(
+                self.hass.services.async_call(
+                    "homeassistant",
+                    "restart",
+                    {},
+                    blocking=False
+                )
+            )
+
+            return entry
+
         finish_text = (
             "🎉 Installationen är klar!\n\n"
-            "SEM är nu installerat och redo att konfigureras.\n\n"
+            "SEM är nu installerat och redo att konfigureras efter en omstart av Home Assistant.\n\n"
             "För att komma igång:\n"
             "1. Öppna dashboarden Energisystem i menyn till vänster.\n"
             "2. Klicka på Mitt system högst upp på sidan.\n"
             "3. Klicka på Konfigurera och följ anvisningarna.\n\n"
             "────────────────────────────\n\n"
             "🔄 Uppdateringar\n\n"
-            "Framtida uppdateringar av SEM hanteras direkt från dashboarden.\n"
-            "Öppna Mitt system och klicka på uppdateringsknappen.\n"
+            "Framtida uppdateringar av SEM hanteras direkt från dashboarden och syns via ikonen Mitt system.\n"
             "När uppdateringen är klar startar du om Home Assistant.\n\n"
             "────────────────────────────\n\n"
-            "🔑 Licens och demoperiod\n\n"
-            "Licens ansöks via Mitt system.\n"
-            "Alla nya användare får 30 dagars demo."
+            "🔑 Användarkod\n\n"
+            "Vissa mer avancerade funktioner kräver en användakod. Läs mer om dessa där du ansöker om en användarkod.\n"
+            "Användarkod ansöker du via Mitt system och vidare köp användarkod.\n"
+            "Alla nya användare får 30 dagars provperiod.\n\n\n"
+            "⚠️ När du klickar på bekräfta startas Home Assistant om automatiskt."
         )
 
         return self.async_show_form(
