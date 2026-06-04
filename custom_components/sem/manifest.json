@@ -1,10 +1,10 @@
 {
   "domain": "sem",
   "name": "SEM",
+  "codeowners": ["@henrik1986"],
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/henrik1986/sem-energy-manager",
-  "codeowners": ["@henrik1986"],
   "iot_class": "calculated",
   "issue_tracker": "https://github.com/henrik1986/sem-energy-manager/issues",
   "requirements": [],
