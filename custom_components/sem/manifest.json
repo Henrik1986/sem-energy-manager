@@ -4,7 +4,8 @@
 "version": "0.1.0",
 "config_flow": true,
 "documentation": "https://github.com/henrik1986/sem-energy-manager",
+"issue_tracker": "https://github.com/henrik1986/sem-energy-manager/issues",
 "requirements": [],
 "dependencies": [],
-"codeowners": []
+"codeowners": ["@henrik1986"]
 }
