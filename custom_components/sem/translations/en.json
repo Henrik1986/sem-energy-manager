@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Välkommen till SEM",
-        "description": "Innan du fortsätter behöver dina solceller och batteri vara tillagda och korrekt konfigurerade i Home Assistant.\n\nOm din anläggning inte redan är konfigurerad måste detta göras först innan du fortsätter. Eftersom du kommer att installera komponenter från HACS är det bra att ha två fönster öppna: ett för installationen av SEM och ett för installation av de komponenter som behövs.\n\nStödda system i denna version:\n- Huawei Solar: https://github.com/wlcrs/huawei_solar"
+        "description": "Innan du fortsätter behöver dina solceller och batteri vara tillagda och korrekt konfigurerade i Home Assistant.\n\nOm din anläggning inte redan är konfigurerad måste detta göras först innan du fortsätter. Eftersom du kommer att installera komponenter från HACS är det bra att ha två fönster öppna: ett för installationen av SEM och ett för installation av de komponenter som behövs.\n\nStödda system i denna version:\n- Huawei Solar:"
       },
       "hacs": {
         "title": "Installera komponenter från HACS",
