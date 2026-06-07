@@ -12,6 +12,9 @@ Funktioner:
 
 Designat för att ge högre självförsörjning, bättre ekonomi och full kontroll över din energianläggning.
 
+Anläggningar som SEM stödjer
+- Huawei (https://github.com/wlcrs/huawei_solar) 
+
 ## Framtida funktioner :raising_hand:
 Har du idéer på nya funktioner? Lämna gärna dina förslag på GitHub under ”Discussions”.
 
