@@ -1,4 +1,4 @@
-# SEM Energy Manager
+# Smart Energy Manager (SEM)
 
 Ett kraftfullt HACS-paket för Home Assistant som optimerar din energianläggning med solceller och batteri – helt automatiskt. Systemet analyserar elpriser, batteriets status och solprognoser i realtid för att maximera egenanvändning och lönsamhet, utan manuell styrning.
 
@@ -11,3 +11,9 @@ Funktioner:
 - Stöd för AI-analys som förbättrar styrning och beslut över tid
 
 Designat för att ge högre självförsörjning, bättre ekonomi och full kontroll över din energianläggning.
+
+## Framtida funktioner :raising_hand:
+Har du idéer på nya funktioner? Lämna gärna dina förslag på GitHub under ”Discussions”.
+
+## Problem :bug:
+Upptäcker du något problem? Rapportera det gärna på GitHub under ”Issues”.
