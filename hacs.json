@@ -2,4 +2,5 @@
     "name": "SEM Energy Manager",
     "content_in_root": false,
     "homeassistant": "2026.1.0",
+    "render_readme": true
 }
