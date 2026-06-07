@@ -15,6 +15,9 @@ Designat för att ge högre självförsörjning, bättre ekonomi och full kontro
 ## Anläggningar som SEM stödjer
 - Huawei – https://github.com/wlcrs/huawei_solar
 
+## Viktigt innan du börjar installationen
+Din anläggning måste vara integrerad med Home Assistant. 
+
 ## Framtida funktioner :raising_hand:
 Har du idéer på nya funktioner? Lämna gärna dina förslag på GitHub under ”Discussions”.
 
