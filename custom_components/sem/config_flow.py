@@ -57,7 +57,7 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "🔴 Hittar ingen Nordpool integration\n\n\n"
                 "1. Hämta Nordpool via HACS och starta om Home Assistant.\n" 
                 "2. Installera och konfiguera Nordpool integrationen i Home Assistant. Din sensor ska visa elpriset i SEK/kWh.\n"
-                "(Inställningar → Enheter & tjänster → Lägg till integration)\n"
+                "(Inställningar > Enheter & tjänster > Lägg till integration)\n"
                 "3. Starta om SEM-installationen för att fortsätta installationen.\n\n\n"
                 "OBS! Bocka i rutan nedan om du använder den officiella Nordpool integrationen från Home Assistant.\n"
                 "https://www.home-assistant.io/integrations/nordpool/"
@@ -124,7 +124,7 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             missing.append("• ApexCharts Card")
 
         if not layout_ok:
-            missing.append("• Lovelace Layout Card")
+            missing.append("• layout-card")
 
         if not vertical_ok:
             missing.append("• Vertical Stack In Card")
@@ -144,7 +144,7 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else (
                 "🔴 Följande HACS-integrationer saknas:\n\n"
                 + "\n".join(missing)
-                + "\n\nInstallera dessa via HACS innan du fortsätter."
+                + "\n\nInstallera dessa via HACS innan du klickar bekräfta."
             )
         )
 
@@ -191,12 +191,13 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         smhi_ok = smhi_exists()
 
         status = (
-            "🟡 SMHI-integrationen och vädersensor hittad.\n\n" 
+            "🟡 SMHI-integrationen och vädersensor hittades.\n\n" 
             "Klicka på bekräfta för att validera integrationen och vädersensorn."
             if smhi_ok
             else (
                 "🔴 SMHI-integrationen är inte tillgänglig eller inte korrekt konfigurerad.\n\n"
-                "Systemet kräver att du har en vädersensor med namnet weather.smhi_home."
+                "- Inställningar > Enheter och tjänster > Lägg till integration \n"  
+                "- Hitta och klicka på SMHI > Konfigurera > Enhetsnamn: Home"
             )
         )
 
@@ -247,16 +248,16 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "status": (
                     "🤖✨ AI-agent\n\n"
                     "Systemet fungerar även utan AI, men med AI-analys kan styrningen bli mer träffsäker och tydlig. Du kan alltid lägga till en AI-agent senare i systemet.\n\n"
-                    "- Google AI (gratis och något ostabil)\n" 
+                    "- Google AI (gratis men ostabilare)\n" 
                     "https://www.home-assistant.io/integrations/google_generative_ai_conversation/\n\n"
-                    "- OpenAI (kostar och stabil) \n"
+                    "- OpenAI (kostar men stabilare) \n"
                     "https://www.home-assistant.io/integrations/openai_conversation/"
                 )
             }
         )
 
     # ─────────────────────────────
-    # YAML STEP
+    # YAML
     # ─────────────────────────────
     async def async_step_yaml_setup(self, user_input=None):
 
@@ -264,23 +265,23 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_install()
 
         yaml_text = (
-            "Steg 1: Installera File Editor 📝\n\n"
-            "Inställningar (kugghjulet ner till vänster) → Appar → Installera app (nere till höger) → Sök (högst upp) → File editor\n"
-            "→ Klicka Installera → Klicka Start → Öppna webbgränssnitt\n\n"
-            "────────────────────────────\n\n"
+            "Steg 1 - Installera File Editor 📝\n\n"
+            "- Inställningar > Appar > Installera app\n"
+            "- Hitta och klicka på File Editor\n"
+            "- Klicka på installera\n"
+            "- Starta File Editor och öppna sen webbgränssnitt\n\n\n\n"
   
-            "Steg 2: Hitta och öppna din configuration.yaml 🔍\n\n"
-            "I File editor → Klicka mappen uppe till vänster → klicka på configuration.yaml\n\n"
-            "────────────────────────────\n\n"
+            "Steg 2 - Hitta och öppna din configuration.yaml 🔍\n\n"
+            "- Klicka på 'mappen' uppe till vänster i File Editor\n"
+            "- Leta upp och klicka på filen configuration.yaml\n\n\n\n"
   
-            "Steg 3: Kopiera in nedanstående kod överst i din configuration.yaml ✂️\n\n"
+            "Steg 3 - Kopiera in nedanstående kod <b><u>överst</u></b> i din configuration.yaml ✂️\n\n"
             "```yaml\n"
             "homeassistant:\n"
             "  packages: !include_dir_named packages\n"
-            "```\n\n"
-            "────────────────────────────\n\n"
+            "```\n\n\n\n"
 
-            "Steg 4: Kopiera in nedanstånede kod längst ner i din configuration.yaml ✂️\n\n"
+            "Steg 4 - Kopiera in nedanstående kod <b><u>längst ner</u></b> i din configuration.yaml och klicka på spara✂️\n\n"
             "```yaml\n"
             "lovelace:\n"
             "  mode: storage\n"
@@ -291,12 +292,11 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "      icon: mdi:dots-circle\n"
             "      show_in_sidebar: true\n"
             "      filename: dashboards/admin_view.yaml\n"
-            "```\n\n"
-            "────────────────────────────\n\n"
+            "```\n\n\n\n"
 
-            "Steg 5: Kontrollera din installation 🧐\n\n"
-            "Inställningar (kugghjulet nere till vänster) → Utvecklarverktyg → Klicka på kontrollera konfiguration\n"
-            "Fortsätt endast installationen om en grön bock visas ✅"
+            "Steg 5 - Kontrollera din installation 🧐\n\n"
+            "- Inställningar > Utvecklarverktyg > Klicka på kontrollera konfiguration\n"
+            "- Klicka på bekräfta om du fått en bekräftelse att Home Assistant inte kommer att hindras från att starta! ✅"
         )
 
         return self.async_show_form(
@@ -306,7 +306,7 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     # ─────────────────────────────
-    # INSTALLATION (NYTT – INBYGGT I WIZARD)
+    # INSTALLATION SEM
     # ─────────────────────────────
     async def async_step_install(self, user_input=None):
 
@@ -408,19 +408,18 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         finish_text = (
             "🎉 Installationen är klar!\n\n"
-            "SEM är nu installerat och redo att konfigureras efter en omstart av Home Assistant.\n\n"
+            "Systenet är nu installerat och redo att konfigureras efter en omstart av Home Assistant.\n\n"
             "För att komma igång:\n"
-            "1. Öppna dashboarden Energisystem i menyn till vänster.\n"
+            "1. Öppna dashboarden 'Energisystem' i menyn till vänster.\n"
             "2. Klicka på Mitt system högst upp på sidan.\n"
             "3. Klicka på Konfigurera och följ anvisningarna.\n\n"
             "────────────────────────────\n\n"
             "🔄 Uppdateringar\n\n"
-            "Framtida uppdateringar av SEM hanteras direkt från dashboarden och syns via ikonen Mitt system.\n"
-            "När uppdateringen är klar startar du om Home Assistant.\n\n"
+            "Framtida uppdateringar av systemet hanteras direkt från dashboarden via ikonen Mitt system.\n"
             "────────────────────────────\n\n"
             "🔑 Användarkod\n\n"
             "Vissa mer avancerade funktioner kräver en användakod. Läs mer om dessa där du ansöker om en användarkod.\n"
-            "Användarkod ansöker du via Mitt system och vidare köp användarkod.\n"
+            "Användarkod ansöker du via Mitt system > Köp användarkod.\n"
             "Alla nya användare får 30 dagars provperiod.\n\n\n"
             "⚠️ När du klickar på bekräfta startas Home Assistant om automatiskt."
         )
