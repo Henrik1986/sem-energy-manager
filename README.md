@@ -14,14 +14,8 @@ Ett kraftfullt HACS-paket för Home Assistant som optimerar din energianläggnin
 
 Designat för att ge högre självförsörjning, bättre ekonomi och full kontroll över din energianläggning.
 
-## Anläggningar som SEM stödjer
-- Huawei – https://github.com/wlcrs/huawei_solar
-
 ## Viktigt innan du börjar installationen
 Din anläggning måste vara integrerad med Home Assistant. 
 
-## Framtida funktioner :raising_hand:
-Har du idéer på nya funktioner? Lämna gärna dina förslag på GitHub under ”Discussions”.
-
-## Problem :bug:
-Upptäcker du något problem? Rapportera det gärna på GitHub under ”Issues”.
+Systemet har stöd för
+- Huawei – https://github.com/wlcrs/huawei_solar
