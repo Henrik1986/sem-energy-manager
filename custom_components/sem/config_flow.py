@@ -11,6 +11,52 @@ DOMAIN = "sem"
 ZIP_URL = "https://github.com/Henrik1986/huawei-energy-managment/archive/refs/heads/main.zip"
 
 
+def install_sem_files(base: str, data: bytes) -> None:
+    tmp_zip = os.path.join(base, "sem_tmp.zip")
+    tmp_dir = os.path.join(base, "sem_tmp")
+
+    packages_dir = os.path.join(base, "packages")
+    dashboards_dir = os.path.join(base, "dashboards")
+
+    os.makedirs(packages_dir, exist_ok=True)
+    os.makedirs(dashboards_dir, exist_ok=True)
+
+    with open(tmp_zip, "wb") as f:
+        f.write(data)
+
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    with zipfile.ZipFile(tmp_zip, "r") as z:
+        z.extractall(tmp_dir)
+
+    base_extracted = os.path.join(tmp_dir, "huawei-energy-managment-main")
+
+    source_backend = os.path.join(base_extracted, "sem")
+    target_backend = os.path.join(packages_dir, "sem")
+
+    if os.path.exists(target_backend):
+        shutil.rmtree(target_backend)
+
+    shutil.copytree(source_backend, target_backend)
+
+    source_frontend = os.path.join(base_extracted, "dashboards")
+
+    if os.path.exists(source_frontend):
+        for item in os.listdir(source_frontend):
+            s = os.path.join(source_frontend, item)
+            d = os.path.join(dashboards_dir, item)
+
+            if os.path.isdir(s):
+                if os.path.exists(d):
+                    shutil.rmtree(d)
+                shutil.copytree(s, d)
+            else:
+                shutil.copy2(s, d)
+
+    os.remove(tmp_zip)
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
@@ -313,14 +359,6 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
 
             base = self.hass.config.path()
-            tmp_zip = os.path.join(base, "sem_tmp.zip")
-            tmp_dir = os.path.join(base, "sem_tmp")
-
-            packages_dir = self.hass.config.path("packages")
-            dashboards_dir = self.hass.config.path("dashboards")
-
-            os.makedirs(packages_dir, exist_ok=True)
-            os.makedirs(dashboards_dir, exist_ok=True)
 
             try:
                 async with aiohttp.ClientSession() as session:
@@ -328,40 +366,9 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                         resp.raise_for_status()
                         data = await resp.read()
 
-                with open(tmp_zip, "wb") as f:
-                    f.write(data)
-
-                shutil.rmtree(tmp_dir, ignore_errors=True)
-
-                with zipfile.ZipFile(tmp_zip, "r") as z:
-                    z.extractall(tmp_dir)
-
-                base_extracted = os.path.join(tmp_dir, "huawei-energy-managment-main")
-
-                source_backend = os.path.join(base_extracted, "sem")
-                target_backend = os.path.join(packages_dir, "sem")
-
-                if os.path.exists(target_backend):
-                    shutil.rmtree(target_backend)
-
-                shutil.copytree(source_backend, target_backend)
-
-                source_frontend = os.path.join(base_extracted, "dashboards")
-
-                if os.path.exists(source_frontend):
-                    for item in os.listdir(source_frontend):
-                        s = os.path.join(source_frontend, item)
-                        d = os.path.join(dashboards_dir, item)
-
-                        if os.path.isdir(s):
-                            if os.path.exists(d):
-                                shutil.rmtree(d)
-                            shutil.copytree(s, d)
-                        else:
-                            shutil.copy2(s, d)
-
-                os.remove(tmp_zip)
-                shutil.rmtree(tmp_dir, ignore_errors=True)
+                await self.hass.async_add_executor_job(
+                    install_sem_files, base, data
+                )
 
             except Exception as e:
                 raise
