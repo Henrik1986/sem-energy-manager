@@ -11,7 +11,7 @@ async def async_setup_entry(
     async_add_entities,
 ) -> None:
 
-    package_path = hass.config.path("packages", "sem")
+    package_path = hass.config.path("sem")
 
     info = await hass.async_add_executor_job(
         check_installation, package_path
