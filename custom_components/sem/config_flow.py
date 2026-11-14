@@ -15,11 +15,7 @@ def install_sem_files(base: str, data: bytes) -> None:
     tmp_zip = os.path.join(base, "sem_tmp.zip")
     tmp_dir = os.path.join(base, "sem_tmp")
 
-    packages_dir = os.path.join(base, "packages")
-    dashboards_dir = os.path.join(base, "dashboards")
-
-    os.makedirs(packages_dir, exist_ok=True)
-    os.makedirs(dashboards_dir, exist_ok=True)
+    sem_dir = os.path.join(base, "sem")
 
     with open(tmp_zip, "wb") as f:
         f.write(data)
@@ -32,7 +28,7 @@ def install_sem_files(base: str, data: bytes) -> None:
     base_extracted = os.path.join(tmp_dir, "huawei-energy-managment-main")
 
     source_backend = os.path.join(base_extracted, "sem")
-    target_backend = os.path.join(packages_dir, "sem")
+    target_backend = sem_dir
 
     if os.path.exists(target_backend):
         shutil.rmtree(target_backend)
@@ -40,6 +36,8 @@ def install_sem_files(base: str, data: bytes) -> None:
     shutil.copytree(source_backend, target_backend)
 
     source_frontend = os.path.join(base_extracted, "dashboards")
+    dashboards_dir = os.path.join(sem_dir, "dashboards")
+    os.makedirs(dashboards_dir, exist_ok=True)
 
     if os.path.exists(source_frontend):
         for item in os.listdir(source_frontend):
@@ -337,7 +335,7 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "      title: Energisystem\n"
             "      icon: mdi:dots-circle\n"
             "      show_in_sidebar: true\n"
-            "      filename: dashboards/admin_view.yaml\n"
+            "      filename: sem/dashboards/admin_view.yaml\n"
             "```\n\n\n\n"
 
             "Steg 5 - Kontrollera din installation 🧐\n\n"
