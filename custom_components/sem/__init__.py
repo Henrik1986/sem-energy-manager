@@ -3,6 +3,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
+from .systems.huawei import log_huawei_entities
 
 PLATFORMS = [Platform.SENSOR]
 
@@ -18,6 +19,8 @@ async def async_setup_entry(
 ) -> bool:
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = entry.data
+
+    log_huawei_entities(hass)
 
     await hass.config_entries.async_forward_entry_setups(
         entry, PLATFORMS
