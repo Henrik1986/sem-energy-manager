@@ -7,7 +7,6 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
@@ -155,24 +154,24 @@ class SemSystemSensor(SemEntityProxyMixin, SensorEntity):
         )
 
     @property
-    def native_value(self) -> float | None:
-        """Return the numeric value reported by the active source."""
-        state = self.source_state
-        if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
-            return None
-
-        try:
-            return float(state.state)
-        except (TypeError, ValueError):
-            return None
+    def native_value(self):
+        """Return the normalized value from the active system adapter."""
+        return self._manager.get_sensor_value(
+            self._entity_key,
+            self.source_state,
+        )
 
     def _update_from_source(self) -> None:
-        """Mirror measurement metadata from the active source."""
+        """Mirror normalized measurement metadata from the adapter."""
         state = self.source_state
         attributes = state.attributes if state is not None else {}
+        metadata = self._manager.get_sensor_metadata(
+            self._entity_key,
+            attributes,
+        )
 
-        device_class = attributes.get("device_class")
-        state_class = attributes.get("state_class")
+        device_class = metadata.get("device_class")
+        state_class = metadata.get("state_class")
 
         try:
             self._attr_device_class = (
@@ -187,10 +186,10 @@ class SemSystemSensor(SemEntityProxyMixin, SensorEntity):
             )
         except ValueError:
             self._attr_state_class = None
-        self._attr_native_unit_of_measurement = attributes.get(
+        self._attr_native_unit_of_measurement = metadata.get(
             "unit_of_measurement"
         )
-        self._attr_suggested_display_precision = attributes.get(
+        self._attr_suggested_display_precision = metadata.get(
             "suggested_display_precision"
         )
 
