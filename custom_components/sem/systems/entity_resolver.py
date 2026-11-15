@@ -3,16 +3,18 @@
 from dataclasses import dataclass
 
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 
 @dataclass(frozen=True, slots=True)
 class EntityRegistryMatch:
-    """Information about a resolved entity."""
+    """Information about a resolved entity and its device relationship."""
 
     entity_id: str
     unique_id: str
     device_id: str | None
+    parent_device_id: str | None
     config_entry_id: str | None
     disabled_by: str | None
 
@@ -25,10 +27,11 @@ def find_registry_entities(
     translation_key: str,
 ) -> list[EntityRegistryMatch]:
     """Find entities using integration platform and translation key."""
-    registry = er.async_get(hass)
+    entity_registry = er.async_get(hass)
+    device_registry = dr.async_get(hass)
     matches: list[EntityRegistryMatch] = []
 
-    for entry in registry.entities.values():
+    for entry in entity_registry.entities.values():
         if entry.platform != platform:
             continue
 
@@ -42,11 +45,20 @@ def find_registry_entities(
         if disabled_by is not None:
             disabled_by = getattr(disabled_by, "value", str(disabled_by))
 
+        device = (
+            device_registry.devices.get(entry.device_id)
+            if entry.device_id is not None
+            else None
+        )
+
         matches.append(
             EntityRegistryMatch(
                 entity_id=entry.entity_id,
                 unique_id=entry.unique_id,
                 device_id=entry.device_id,
+                parent_device_id=(
+                    device.via_device_id if device is not None else None
+                ),
                 config_entry_id=entry.config_entry_id,
                 disabled_by=disabled_by,
             )
