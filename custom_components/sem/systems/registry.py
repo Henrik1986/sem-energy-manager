@@ -165,6 +165,18 @@ class SemEntityRegistry:
 
         return configured[0]
 
+    def get_entity_status(
+        self,
+        system_id: str,
+        entity_key: str,
+    ) -> EntityStatus | None:
+        """Return the current resolution status for a logical entity."""
+        system = self._systems.get(system_id)
+        if system is None:
+            return None
+        result = system.entities.get(entity_key)
+        return result.status if result is not None else None
+
     def get_entity_sources(
         self,
         system_id: str,
