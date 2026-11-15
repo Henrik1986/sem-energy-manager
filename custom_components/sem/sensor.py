@@ -118,7 +118,47 @@ class SemEntityStatusSensor(SensorEntity):
     def extra_state_attributes(self) -> dict:
         attributes = self._registry.as_dict()
         attributes.pop("status", None)
+        attributes["setup_errors"] = self._get_setup_errors(attributes)
         return attributes
+
+    @staticmethod
+    def _get_setup_errors(attributes: dict) -> list[dict]:
+        """Build actionable setup errors for required system entities."""
+        errors = []
+        huawei = attributes.get("systems", {}).get("huawei", {})
+        capacity = huawei.get("entities", {}).get(
+            "battery_rated_capacity", {}
+        )
+        status = capacity.get("status")
+
+        if status == "disabled":
+            errors.append({
+                "code": "huawei_battery_capacity_disabled",
+                "message": (
+                    "Huawei: Entiteten för batteriets nominella kapacitet "
+                    "är inaktiverad."
+                ),
+                "action": (
+                    "Aktivera entiteten 'Rated Capacity' under varje "
+                    "batterienhet i Home Assistant och starta sedan om SEM."
+                ),
+                "entities": capacity.get("matches", []),
+            })
+        elif status == "missing":
+            errors.append({
+                "code": "huawei_battery_capacity_missing",
+                "message": (
+                    "Huawei: SEM hittar inte kapacitetsentiteten för alla "
+                    "identifierade batterisystem."
+                ),
+                "action": (
+                    "Kontrollera att 'Rated Capacity' finns och är aktiverad "
+                    "för varje batterienhet i Home Assistant."
+                ),
+                "entities": capacity.get("matches", []),
+            })
+
+        return errors
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
