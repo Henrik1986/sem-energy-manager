@@ -37,7 +37,7 @@ NUMBER_ENTITY_DEFINITIONS = (
 
 
 class SemEntityProxyMixin:
-    """Common behaviour for SEM entities backed by an active adapter."""
+    """Common behaviour for SEM entities backed by physical source entities."""
 
     def __init__(
         self,
@@ -50,7 +50,7 @@ class SemEntityProxyMixin:
         self._manager = manager
         self._registry = manager.registry
         self._entity_key = entity_key
-        self._source_entity_id: str | None = None
+        self._source_entity_ids: list[str] = []
         self._source_unsub = None
 
         self._attr_has_entity_name = False
@@ -66,7 +66,7 @@ class SemEntityProxyMixin:
         )
 
     async def async_added_to_hass(self) -> None:
-        """Subscribe to registry and source entity updates."""
+        """Subscribe to registry and every active source entity."""
         await super().async_added_to_hass()
         self.async_on_remove(
             self._registry.add_listener(self._handle_registry_update)
@@ -77,59 +77,92 @@ class SemEntityProxyMixin:
 
     @callback
     def _handle_registry_update(self) -> None:
-        """Refresh the source entity when the registry changes."""
+        """Refresh source subscriptions when the registry changes."""
         self._refresh_source_listener()
         self._update_from_source()
         self.async_write_ha_state()
 
     @callback
     def _handle_source_state_change(self, event) -> None:
-        """Update the proxy when its source entity changes."""
+        """Update the proxy when any physical source changes."""
         self._update_from_source()
         self.async_write_ha_state()
 
     def _update_from_source(self) -> None:
-        """Update platform-specific values from the current source."""
+        """Update platform-specific values from the adapter."""
 
     @callback
     def _refresh_source_listener(self) -> None:
-        """Follow the entity currently resolved by the SEM registry."""
-        entity_id = self._manager.get_entity_id(self._entity_key)
-
-        if entity_id == self._source_entity_id:
+        """Follow all source entities resolved by the SEM registry."""
+        entity_ids = self._manager.get_entity_ids(self._entity_key)
+        if entity_ids == self._source_entity_ids:
             return
 
         self._remove_source_listener()
-        self._source_entity_id = entity_id
-
-        if entity_id is not None:
+        self._source_entity_ids = entity_ids
+        if entity_ids:
             self._source_unsub = async_track_state_change_event(
                 self.hass,
-                [entity_id],
+                entity_ids,
                 self._handle_source_state_change,
             )
 
     @callback
     def _remove_source_listener(self) -> None:
-        """Remove the current source entity subscription."""
+        """Remove source entity subscriptions."""
         if self._source_unsub is not None:
             self._source_unsub()
             self._source_unsub = None
 
     @property
+    def source_states(self) -> list[State | None]:
+        """Return current states for every resolved source entity."""
+        return [
+            self.hass.states.get(entity_id)
+            for entity_id in self._source_entity_ids
+        ]
+
+    @property
     def source_state(self) -> State | None:
-        """Return the current state of the resolved source entity."""
-        if self._source_entity_id is None:
-            return None
-        return self.hass.states.get(self._source_entity_id)
+        """Return the first source state for backwards compatibility."""
+        states = self.source_states
+        return states[0] if states else None
 
     @property
     def available(self) -> bool:
-        """Only report available while the resolved source is available."""
-        state = self.source_state
-        return state is not None and state.state not in (
-            "unknown",
-            "unavailable",
+        """Require every resolved physical source to be available."""
+        states = self.source_states
+        return bool(states) and all(
+            state is not None and state.state not in ("unknown", "unavailable")
+            for state in states
+        )
+
+    async def async_call_sources(
+        self,
+        service: str,
+        service_data: dict[str, Any],
+        *,
+        entity_ids: list[str] | None = None,
+    ) -> None:
+        """Forward one service call to all resolved physical source entities."""
+        targets = entity_ids if entity_ids is not None else self._source_entity_ids
+        if not targets:
+            raise HomeAssistantError(
+                f"No source entities resolved for SEM key {self._entity_key}"
+            )
+        domains = {entity_id.split(".", 1)[0] for entity_id in targets}
+        if len(domains) != 1:
+            raise HomeAssistantError(
+                f"Source domains differ for SEM key {self._entity_key}"
+            )
+        await self.hass.services.async_call(
+            next(iter(domains)),
+            service,
+            {
+                **service_data,
+                "entity_id": targets,
+            },
+            blocking=True,
         )
 
     async def async_call_source(
@@ -137,19 +170,5 @@ class SemEntityProxyMixin:
         service: str,
         service_data: dict[str, Any],
     ) -> None:
-        """Forward a standard Home Assistant service to the active source."""
-        if self._source_entity_id is None:
-            raise HomeAssistantError(
-                f"No source entity resolved for SEM key {self._entity_key}"
-            )
-
-        domain = self._source_entity_id.split(".", 1)[0]
-        await self.hass.services.async_call(
-            domain,
-            service,
-            {
-                **service_data,
-                "entity_id": self._source_entity_id,
-            },
-            blocking=True,
-        )
+        """Compatibility wrapper for callers expecting a single source."""
+        await self.async_call_sources(service, service_data)
