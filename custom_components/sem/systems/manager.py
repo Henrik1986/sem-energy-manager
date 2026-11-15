@@ -86,6 +86,42 @@ class SemSystemManager:
             entity_key,
         )
 
+    def get_sensor_value(self, entity_key: str, source_state):
+        """Return the active adapter's normalized sensor value."""
+        adapter = self.active_adapter
+        if adapter is None:
+            return None
+        return adapter.get_sensor_value(entity_key, source_state)
+
+    def get_sensor_metadata(
+        self,
+        entity_key: str,
+        source_attributes: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return the active adapter's normalized sensor metadata."""
+        adapter = self.active_adapter
+        if adapter is None:
+            return {}
+        return adapter.get_sensor_metadata(entity_key, source_attributes)
+
+    def get_number_value(self, entity_key: str, source_state) -> float | None:
+        """Return the active adapter's normalized number value."""
+        adapter = self.active_adapter
+        if adapter is None:
+            return None
+        return adapter.get_number_value(entity_key, source_state)
+
+    def get_number_metadata(
+        self,
+        entity_key: str,
+        source_attributes: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return the active adapter's normalized number capabilities."""
+        adapter = self.active_adapter
+        if adapter is None:
+            return {}
+        return adapter.get_number_metadata(entity_key, source_attributes)
+
     def get_select_options(
         self,
         entity_key: str,
