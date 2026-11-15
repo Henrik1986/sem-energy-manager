@@ -1,4 +1,4 @@
-"""Shared proxy support for SEM entities backed by Huawei Solar."""
+"""Shared proxy support for SEM system entities."""
 
 from __future__ import annotations
 
@@ -37,31 +37,32 @@ NUMBER_ENTITY_DEFINITIONS = (
 )
 
 
-class SemHuaweiProxyMixin:
-    """Common behaviour for SEM entities backed by a resolved Huawei entity."""
+class SemEntityProxyMixin:
+    """Common behaviour for SEM entities backed by an active adapter."""
 
     def __init__(
         self,
-        registry: SemEntityRegistry,
+        manager,
         *,
         entity_key: str,
         name: str,
         icon: str,
     ) -> None:
-        self._registry = registry
+        self._manager = manager
+        self._registry = manager.registry
         self._entity_key = entity_key
         self._source_entity_id: str | None = None
         self._source_unsub = None
 
         self._attr_has_entity_name = False
         self._attr_name = name
-        self._attr_unique_id = f"sem_huawei_{entity_key}"
+        self._attr_unique_id = f"sem_{entity_key}"
         self._attr_icon = icon
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, "huawei_entity_bridge")},
             name="SEM Energy System",
             manufacturer="SEM",
-            model="Huawei entity bridge",
+            model="Energy system adapter",
         )
 
     async def async_added_to_hass(self) -> None:
@@ -93,10 +94,7 @@ class SemHuaweiProxyMixin:
     @callback
     def _refresh_source_listener(self) -> None:
         """Follow the entity currently resolved by the SEM registry."""
-        entity_id = self._registry.get_entity_id(
-            "huawei",
-            self._entity_key,
-        )
+        entity_id = self._manager.get_entity_id(self._entity_key)
 
         if entity_id == self._source_entity_id:
             return
@@ -139,10 +137,10 @@ class SemHuaweiProxyMixin:
         service: str,
         service_data: dict[str, Any],
     ) -> None:
-        """Forward a service call to the currently resolved Huawei entity."""
+        """Forward a standard Home Assistant service to the active source."""
         if self._source_entity_id is None:
             raise HomeAssistantError(
-                f"No Huawei entity resolved for SEM key {self._entity_key}"
+                f"No source entity resolved for SEM key {self._entity_key}"
             )
 
         domain = self._source_entity_id.split(".", 1)[0]
