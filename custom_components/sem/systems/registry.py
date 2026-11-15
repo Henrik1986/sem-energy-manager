@@ -21,9 +21,21 @@ VALID_STATUSES = {
 }
 
 
+@dataclass(frozen=True)
+class EntitySource:
+    """One physical source entity resolved for a logical SEM entity."""
+
+    entity_id: str
+    unique_id: str | None = None
+    platform: str | None = None
+    device_id: str | None = None
+    parent_device_id: str | None = None
+    config_entry_id: str | None = None
+
+
 @dataclass
 class EntityResolution:
-    """Resolution result for one entity."""
+    """Resolution result for one logical SEM entity."""
 
     status: EntityStatus = "pending"
     entity_id: str | None = None
@@ -32,6 +44,7 @@ class EntityResolution:
     device_id: str | None = None
     config_entry_id: str | None = None
     matches: list[str] = field(default_factory=list)
+    sources: list[EntitySource] = field(default_factory=list)
 
 
 @dataclass
@@ -91,8 +104,9 @@ class SemEntityRegistry:
         device_id: str | None = None,
         config_entry_id: str | None = None,
         matches: list[str] | None = None,
+        sources: list[EntitySource] | None = None,
     ) -> None:
-        """Store the resolution result for an entity."""
+        """Store one or more physical sources for a logical SEM entity."""
 
         if status not in VALID_STATUSES:
             raise ValueError(f"Invalid entity status: {status}")
@@ -104,6 +118,24 @@ class SemEntityRegistry:
                 f"Unknown entity {entity_key} for system {system_id}"
             )
 
+        resolved_sources = list(sources or [])
+        first_source = resolved_sources[0] if resolved_sources else None
+
+        if first_source is not None:
+            entity_id = entity_id or first_source.entity_id
+            unique_id = unique_id or first_source.unique_id
+            platform = platform or first_source.platform
+            device_id = device_id or first_source.device_id
+            config_entry_id = config_entry_id or first_source.config_entry_id
+
+        resolved_matches = list(matches or [])
+        if not resolved_matches and resolved_sources:
+            resolved_matches = [
+                source.entity_id for source in resolved_sources
+            ]
+        elif not resolved_matches and entity_id is not None:
+            resolved_matches = [entity_id]
+
         system.entities[entity_key] = EntityResolution(
             status=status,
             entity_id=entity_id,
@@ -111,7 +143,8 @@ class SemEntityRegistry:
             platform=platform,
             device_id=device_id,
             config_entry_id=config_entry_id,
-            matches=matches or [],
+            matches=resolved_matches,
+            sources=resolved_sources,
         )
 
         self._notify()
@@ -129,12 +162,69 @@ class SemEntityRegistry:
 
         return configured[0]
 
+    def get_entity_sources(
+        self,
+        system_id: str,
+        entity_key: str,
+    ) -> list[EntitySource]:
+        """Return all physical source entities for a logical SEM entity."""
+        system = self._systems.get(system_id)
+        if system is None:
+            return []
+
+        result = system.entities.get(entity_key)
+        if result is None or result.status != "found":
+            return []
+
+        if result.sources:
+            return list(result.sources)
+
+        if result.entity_id is None:
+            return []
+
+        return [
+            EntitySource(
+                entity_id=result.entity_id,
+                unique_id=result.unique_id,
+                platform=result.platform,
+                device_id=result.device_id,
+                config_entry_id=result.config_entry_id,
+            )
+        ]
+
+    def get_entity_ids(
+        self,
+        system_id: str,
+        entity_key: str,
+    ) -> list[str]:
+        """Return all source entity IDs for a logical SEM entity."""
+        return [
+            source.entity_id
+            for source in self.get_entity_sources(system_id, entity_key)
+        ]
+
+    def get_entity_device_ids(
+        self,
+        system_id: str,
+        entity_key: str,
+    ) -> list[str]:
+        """Return unique device IDs for a logical SEM entity."""
+        return list(dict.fromkeys(
+            source.device_id
+            for source in self.get_entity_sources(system_id, entity_key)
+            if source.device_id is not None
+        ))
+
     def get_entity_device_id(
         self,
         system_id: str,
         entity_key: str,
     ) -> str | None:
-        """Return the device ID for a resolved system entity."""
+        """Return the first device ID for backwards compatibility."""
+        device_ids = self.get_entity_device_ids(system_id, entity_key)
+        if device_ids:
+            return device_ids[0]
+
         system = self._systems.get(system_id)
         if system is None:
             return None
@@ -150,7 +240,11 @@ class SemEntityRegistry:
         system_id: str,
         entity_key: str,
     ) -> str | None:
-        """Return a resolved entity ID for a logical system entity."""
+        """Return the first entity ID for backwards compatibility."""
+        entity_ids = self.get_entity_ids(system_id, entity_key)
+        if entity_ids:
+            return entity_ids[0]
+
         system = self._systems.get(system_id)
         if system is None:
             return None
@@ -206,6 +300,17 @@ class SemEntityRegistry:
                     "device_id": result.device_id,
                     "config_entry_id": result.config_entry_id,
                     "matches": result.matches,
+                    "sources": [
+                        {
+                            "entity_id": source.entity_id,
+                            "unique_id": source.unique_id,
+                            "platform": source.platform,
+                            "device_id": source.device_id,
+                            "parent_device_id": source.parent_device_id,
+                            "config_entry_id": source.config_entry_id,
+                        }
+                        for source in result.sources
+                    ],
                 }
 
                 item = {
