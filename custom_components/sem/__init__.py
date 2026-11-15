@@ -6,7 +6,7 @@ from .const import DOMAIN
 from .systems.huawei import async_wait_for_huawei
 from .systems.registry import SemEntityRegistry
 
-PLATFORMS = [Platform.SENSOR]
+PLATFORMS = [Platform.SENSOR, Platform.SELECT, Platform.NUMBER]
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
