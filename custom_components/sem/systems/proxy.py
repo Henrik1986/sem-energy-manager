@@ -10,7 +10,6 @@ from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.event import async_track_state_change_event
 
 from ..const import DOMAIN
-from .registry import SemEntityRegistry
 
 
 SENSOR_ENTITY_DEFINITIONS = (
