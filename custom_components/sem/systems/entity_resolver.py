@@ -21,6 +21,16 @@ class EntityRegistryMatch:
     disabled_by: str | None
 
 
+def _get_parent_device_id(device: dr.AnyDeviceEntry | None) -> str | None:
+    """Return the parent for both main and child device registry entries."""
+    if device is None:
+        return None
+
+    return getattr(device, "parent_device_id", None) or getattr(
+        device, "via_device_id", None
+    )
+
+
 def _get_root_device_id(
     device_registry: dr.DeviceRegistry,
     device_id: str | None,
@@ -35,10 +45,11 @@ def _get_root_device_id(
         visited.add(current_device_id)
 
         device = device_registry.async_get(current_device_id)
-        if device is None or device.via_device_id is None:
+        parent_device_id = _get_parent_device_id(device)
+        if parent_device_id is None:
             return current_device_id
 
-        current_device_id = device.via_device_id
+        current_device_id = parent_device_id
 
     return current_device_id or device_id
 
@@ -100,9 +111,7 @@ def find_registry_entities(
                 entity_id=entry.entity_id,
                 unique_id=entry.unique_id,
                 device_id=entry.device_id,
-                parent_device_id=(
-                    device.via_device_id if device is not None else None
-                ),
+                parent_device_id=_get_parent_device_id(device),
                 root_device_id=_get_root_device_id(
                     device_registry, entry.device_id
                 ),
