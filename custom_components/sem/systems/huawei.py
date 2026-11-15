@@ -879,21 +879,20 @@ class HuaweiSolarAdapter(SemSystemAdapter):
                 source.entity_id,
                 parse_numeric(state.state) if state is not None else None,
             ))
-        valid_meter_values = [value for _, value in meter_values if value is not None]
         if len(meter_values) > 1 and plant_meter_value(
             [value for _, value in meter_values]
         ) is None:
             mismatches.append({
-                    "entity": "power_meter_active_power",
-                    "message": (
-                        "Several Huawei meter entities report conflicting plant values. "
-                        "The SEM meter sensor is unavailable to prevent double counting."
-                    ),
-                    "sources": [
-                        {"entity_id": entity_id, "value": value}
-                        for entity_id, value in meter_values
-                    ],
-                })
+                "entity": "power_meter_active_power",
+                "message": (
+                    "Several Huawei meter entities report conflicting plant values. "
+                    "The SEM meter sensor is unavailable to prevent double counting."
+                ),
+                "sources": [
+                    {"entity_id": entity_id, "value": value}
+                    for entity_id, value in meter_values
+                ],
+            })
 
         groups = get_huawei_inverter_groups(registry)
         return {
