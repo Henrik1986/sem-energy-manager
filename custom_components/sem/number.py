@@ -46,32 +46,32 @@ class SemSystemNumber(SemEntityProxyMixin, NumberEntity):
     def _update_from_source(self) -> None:
         """Mirror the value and limits from the active source."""
         state = self.source_state
-        if state is None:
-            self._attr_native_value = None
-            return
+        attributes = state.attributes if state is not None else {}
+        metadata = self._manager.get_number_metadata(
+            self._entity_key,
+            attributes,
+        )
 
-        try:
-            self._attr_native_value = float(state.state)
-        except (TypeError, ValueError):
-            self._attr_native_value = None
-
-        attributes = state.attributes
+        self._attr_native_value = self._manager.get_number_value(
+            self._entity_key,
+            state,
+        )
         self._attr_native_min_value = self._number_attribute(
-            attributes, "min", 0
+            metadata, "min_value", 0
         )
         self._attr_native_max_value = self._number_attribute(
-            attributes, "max", 100
+            metadata, "max_value", 100
         )
         self._attr_native_step = self._number_attribute(
-            attributes, "step", 1
+            metadata, "step", 1
         )
-        self._attr_native_unit_of_measurement = attributes.get(
+        self._attr_native_unit_of_measurement = metadata.get(
             "unit_of_measurement"
         )
 
         try:
             self._attr_mode = NumberMode(
-                attributes.get("mode", NumberMode.AUTO)
+                metadata.get("mode", NumberMode.AUTO)
             )
         except ValueError:
             self._attr_mode = NumberMode.AUTO
