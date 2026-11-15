@@ -1,9 +1,10 @@
-"""SEM number entities backed by the active system adapter."""
+"""SEM number entities mirrored to all physical Huawei devices."""
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
+from .systems.huawei_aggregation import value_fits_number_metadata
 from .systems.proxy import NUMBER_ENTITY_DEFINITIONS, SemEntityProxyMixin
 
 
@@ -12,7 +13,6 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
     manager = hass.data[DOMAIN]["system_managers"].get(entry.entry_id)
     if manager is None:
         return
-
     async_add_entities(
         SemSystemNumber(manager, *definition)
         for definition in NUMBER_ENTITY_DEFINITIONS
@@ -20,15 +20,9 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
 
 
 class SemSystemNumber(SemEntityProxyMixin, NumberEntity):
-    """A stable SEM number backed by the active system adapter."""
+    """A stable SEM number mirrored to every physical battery system."""
 
-    def __init__(
-        self,
-        manager,
-        entity_key: str,
-        name: str,
-        icon: str,
-    ) -> None:
+    def __init__(self, manager, entity_key: str, name: str, icon: str) -> None:
         SemEntityProxyMixin.__init__(
             self,
             manager,
@@ -44,17 +38,18 @@ class SemSystemNumber(SemEntityProxyMixin, NumberEntity):
         self._attr_mode = NumberMode.AUTO
 
     def _update_from_source(self) -> None:
-        """Mirror the value and limits from the active source."""
-        state = self.source_state
-        attributes = state.attributes if state is not None else {}
+        """Mirror a shared value and the range common to all source entities."""
+        states = self.source_states
+        attributes = [
+            state.attributes for state in states if state is not None
+        ]
         metadata = self._manager.get_number_metadata(
             self._entity_key,
             attributes,
         )
-
         self._attr_native_value = self._manager.get_number_value(
             self._entity_key,
-            state,
+            states,
         )
         self._attr_native_min_value = self._number_attribute(
             metadata, "min_value", 0
@@ -68,7 +63,6 @@ class SemSystemNumber(SemEntityProxyMixin, NumberEntity):
         self._attr_native_unit_of_measurement = metadata.get(
             "unit_of_measurement"
         )
-
         try:
             self._attr_mode = NumberMode(
                 metadata.get("mode", NumberMode.AUTO)
@@ -77,30 +71,36 @@ class SemSystemNumber(SemEntityProxyMixin, NumberEntity):
             self._attr_mode = NumberMode.AUTO
 
     @staticmethod
-    def _number_attribute(
-        attributes: dict,
-        key: str,
-        default: float,
-    ) -> float:
-        """Read a numeric capability from the source state."""
+    def _number_attribute(attributes: dict, key: str, default: float) -> float:
+        """Read a numeric capability from shared metadata."""
         try:
             return float(attributes.get(key, default))
         except (TypeError, ValueError):
             return default
 
     async def async_set_native_value(self, value: float) -> None:
-        """Forward a value change to the active source."""
-        if not self.available:
+        """Validate the requested value against every physical number entity."""
+        states = self.source_states
+        if not states or any(state is None for state in states):
             raise HomeAssistantError(
-                f"The source entity for {self._entity_key} is unavailable"
+                f"Not all source entities are available for {self._entity_key}"
             )
 
-        await self.async_call_source(
-            "set_value",
-            {"value": value},
-        )
+        if len(states) != len(self._source_entity_ids):
+            raise HomeAssistantError(
+                f"Source list changed while setting {self._entity_key}"
+            )
+
+        for entity_id, state in zip(self._source_entity_ids, states):
+            assert state is not None
+            if not value_fits_number_metadata(value, state.attributes):
+                raise HomeAssistantError(
+                    f"Value {value} is not supported by source {entity_id}"
+                )
+
+        await self.async_call_sources("set_value", {"value": value})
 
     @property
     def extra_state_attributes(self) -> dict:
-        """Expose the resolved source entity."""
-        return {"source_entity_id": self._source_entity_id}
+        """Expose all physical number entities."""
+        return {"source_entity_ids": list(self._source_entity_ids)}
