@@ -1,9 +1,11 @@
 """Huawei Solar entity adapter."""
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Final
 
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 
 from .entity_resolver import EntityRegistryMatch, find_registry_entities
@@ -86,3 +88,62 @@ def log_huawei_entities(hass: HomeAssistant) -> None:
                 "Huawei resolver: No entity found for %s",
                 function,
             )
+
+
+async def async_wait_for_huawei(hass: HomeAssistant) -> None:
+    """Wait until Huawei Solar has completed its setup."""
+
+    terminal_states = {
+        ConfigEntryState.LOADED,
+        ConfigEntryState.SETUP_ERROR,
+        ConfigEntryState.MIGRATION_ERROR,
+        ConfigEntryState.FAILED_UNLOAD,
+    }
+
+    entries = [
+        entry
+        for entry in hass.config_entries.async_entries(HUAWEI_DOMAIN)
+        if entry.disabled_by is None
+    ]
+
+    if not entries:
+        _LOGGER.warning(
+            "Huawei resolver: No enabled Huawei Solar config entry found"
+        )
+        return
+
+    _LOGGER.info(
+        "Huawei resolver: Waiting for Huawei Solar to finish starting"
+    )
+
+    for _ in range(120):
+        if hass.is_stopping:
+            return
+
+        entries = [
+            entry
+            for entry in hass.config_entries.async_entries(HUAWEI_DOMAIN)
+            if entry.disabled_by is None
+        ]
+
+        if not entries:
+            _LOGGER.warning(
+                "Huawei resolver: No enabled Huawei Solar config entry found"
+            )
+            return
+
+        if all(entry.state in terminal_states for entry in entries):
+            if any(entry.state is ConfigEntryState.LOADED for entry in entries):
+                log_huawei_entities(hass)
+            else:
+                _LOGGER.error(
+                    "Huawei resolver: Huawei Solar failed to load. States: %s",
+                    [(entry.title, entry.state.value) for entry in entries],
+                )
+            return
+
+        await asyncio.sleep(5)
+
+    _LOGGER.warning(
+        "Huawei resolver: Timed out waiting for Huawei Solar (10 minutes)"
+    )
