@@ -119,11 +119,39 @@ def register_huawei_entities(
 
         if function == "battery_rated_capacity":
             battery_entities = resolved.get("battery_state_of_capacity", [])
-            expected_batteries = len(battery_entities)
-            active_ids = [entity.entity_id for entity in active]
-            disabled_ids = [entity.entity_id for entity in disabled]
+            battery_device_ids = {
+                entity.device_id
+                for entity in battery_entities
+                if entity.device_id is not None
+            }
 
-            if disabled:
+            active_by_device = {
+                entity.device_id: entity
+                for entity in active
+                if entity.device_id is not None
+            }
+            disabled_by_device = {
+                entity.device_id: entity
+                for entity in disabled
+                if entity.device_id is not None
+            }
+
+            disabled_batteries = sorted(
+                device_id
+                for device_id in battery_device_ids
+                if device_id in disabled_by_device
+            )
+            missing_batteries = sorted(
+                device_id
+                for device_id in battery_device_ids
+                if device_id not in active_by_device
+            )
+
+            if disabled_batteries:
+                disabled_ids = [
+                    disabled_by_device[device_id].entity_id
+                    for device_id in disabled_batteries
+                ]
                 sem_registry.set_entity_result(
                     HUAWEI_SYSTEM_ID,
                     function,
@@ -132,26 +160,33 @@ def register_huawei_entities(
                     matches=disabled_ids,
                 )
                 _LOGGER.error(
-                    "Huawei resolver: Battery rated capacity is disabled for: %s. "
+                    "Huawei resolver: Rated Capacity is disabled for battery device IDs: %s. "
                     "Enable the Rated Capacity sensor for every battery system.",
-                    disabled_ids,
+                    disabled_batteries,
                 )
-            elif not matches or len(active) < expected_batteries:
+            elif missing_batteries or not battery_device_ids:
+                missing_ids = [
+                    active_by_device[device_id].entity_id
+                    for device_id in battery_device_ids
+                    if device_id in active_by_device
+                ]
                 sem_registry.set_entity_result(
                     HUAWEI_SYSTEM_ID,
                     function,
                     status="missing",
                     platform=HUAWEI_DOMAIN,
-                    matches=active_ids,
+                    matches=missing_ids,
                 )
                 _LOGGER.error(
-                    "Huawei resolver: Battery rated capacity is missing. "
-                    "Found %s enabled capacity entities for %s battery systems.",
-                    len(active),
-                    expected_batteries,
+                    "Huawei resolver: Rated Capacity is missing for battery device IDs: %s.",
+                    missing_batteries or "no battery devices identified",
                 )
             else:
-                first = active[0]
+                active_ids = [
+                    active_by_device[device_id].entity_id
+                    for device_id in sorted(battery_device_ids)
+                ]
+                first = active_by_device[sorted(battery_device_ids)[0]]
                 sem_registry.set_entity_result(
                     HUAWEI_SYSTEM_ID,
                     function,
@@ -164,8 +199,8 @@ def register_huawei_entities(
                     matches=active_ids,
                 )
                 _LOGGER.info(
-                    "Huawei resolver: Found enabled rated capacity entities for %s battery systems: %s",
-                    expected_batteries,
+                    "Huawei resolver: Rated Capacity is enabled for all %s battery systems: %s",
+                    len(battery_device_ids),
                     active_ids,
                 )
 
