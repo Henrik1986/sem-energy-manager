@@ -4,6 +4,7 @@ from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
 from .systems.huawei import async_wait_for_huawei
+from .systems.registry import SemEntityRegistry
 
 PLATFORMS = [Platform.SENSOR]
 
@@ -20,7 +21,15 @@ async def async_setup_entry(
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = entry.data
 
-    hass.async_create_task(async_wait_for_huawei(hass))
+    entity_registries = hass.data[DOMAIN].setdefault(
+        "entity_registries", {}
+    )
+    entity_registry = SemEntityRegistry()
+    entity_registries[entry.entry_id] = entity_registry
+
+    hass.async_create_task(
+        async_wait_for_huawei(hass, entity_registry)
+    )
 
     await hass.config_entries.async_forward_entry_setups(
         entry, PLATFORMS
@@ -39,5 +48,8 @@ async def async_unload_entry(
 
     if unload_ok:
         hass.data[DOMAIN].pop(entry.entry_id, None)
+        hass.data[DOMAIN].get("entity_registries", {}).pop(
+            entry.entry_id, None
+        )
 
     return unload_ok
