@@ -6,11 +6,11 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 
-from .entity_resolver import EntityRegistryMatch, find_registry_entities
 from .adapter import SemSystemAdapter
+from .entity_resolver import EntityRegistryMatch, find_registry_entities
 from .registry import SemEntityRegistry
 
 _LOGGER = logging.getLogger(__name__)
