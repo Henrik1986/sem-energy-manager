@@ -83,19 +83,6 @@ HUAWEI_ENTITY_MAP: Final[dict[str, HuaweiEntityDefinition]] = {
 }
 
 
-# These entities are attached to the battery or meter child device in HA.
-# Their parent device is the inverter that owns the physical system.
-HUAWEI_CHILD_DEVICE_ENTITY_KEYS: Final[frozenset[str]] = frozenset({
-    "battery_working_mode",
-    "battery_state_of_capacity",
-    "battery_rated_capacity",
-    "battery_charge_discharge_power",
-    "battery_day_charge",
-    "battery_day_discharge",
-    "power_meter_active_power",
-})
-
-
 def _to_entity_sources(
     entity_key: str,
     matches: list[EntityRegistryMatch],
@@ -105,7 +92,7 @@ def _to_entity_sources(
 
     for entity in matches:
         owner_device_id = entity.device_id
-        if entity_key in HUAWEI_CHILD_DEVICE_ENTITY_KEYS:
+        if entity.device_type in {"battery", "battery_module", "power_meter"}:
             owner_device_id = entity.parent_device_id or entity.device_id
 
         sources.append(
@@ -116,6 +103,7 @@ def _to_entity_sources(
                 device_id=entity.device_id,
                 parent_device_id=entity.parent_device_id,
                 root_device_id=entity.root_device_id,
+                device_type=entity.device_type,
                 owner_device_id=owner_device_id,
                 config_entry_id=entity.config_entry_id,
             )
