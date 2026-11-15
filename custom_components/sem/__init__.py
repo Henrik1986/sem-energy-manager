@@ -3,7 +3,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 
 from .const import DOMAIN
-from .systems.huawei import log_huawei_entities
+from .systems.huawei import async_wait_for_huawei
 
 PLATFORMS = [Platform.SENSOR]
 
@@ -20,7 +20,7 @@ async def async_setup_entry(
     hass.data.setdefault(DOMAIN, {})
     hass.data[DOMAIN][entry.entry_id] = entry.data
 
-    log_huawei_entities(hass)
+    hass.async_create_task(async_wait_for_huawei(hass))
 
     await hass.config_entries.async_forward_entry_setups(
         entry, PLATFORMS
