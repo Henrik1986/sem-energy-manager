@@ -6,7 +6,7 @@ from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
-from .systems.huawei import HuaweiSolarAdapter
+from .systems.adapters import create_system_adapters
 from .systems.manager import SemSystemManager
 from .systems.registry import SemEntityRegistry
 
@@ -76,7 +76,8 @@ async def async_setup_entry(
     entity_registries[entry.entry_id] = entity_registry
 
     system_manager = SemSystemManager(hass, entity_registry)
-    system_manager.register_adapter(HuaweiSolarAdapter())
+    for adapter in create_system_adapters():
+        system_manager.register_adapter(adapter)
 
     system_managers = hass.data[DOMAIN].setdefault(
         "system_managers", {}
