@@ -9,6 +9,7 @@ from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant
 
 from .entity_resolver import EntityRegistryMatch, find_registry_entities
+from .adapter import SemSystemAdapter
 from .registry import SemEntityRegistry
 
 _LOGGER = logging.getLogger(__name__)
@@ -282,3 +283,149 @@ async def async_wait_for_huawei(
     _LOGGER.warning(
         "Huawei resolver: Timed out waiting for Huawei Solar (10 minutes)"
     )
+
+
+
+class HuaweiSolarAdapter(SemSystemAdapter):
+    """Adapter for the Huawei Solar Home Assistant integration."""
+
+    system_id = HUAWEI_SYSTEM_ID
+    integration_domain = HUAWEI_DOMAIN
+
+    _WORKING_MODE_MAP: Final[dict[str, str]] = {
+        "maximise_self_consumption": "self_consumption",
+        "time_of_use_luna2000": "time_of_use",
+        "fully_fed_to_grid": "feed_in_priority",
+        "fixed_charge_discharge": "fixed_charge_discharge",
+        "adaptive": "adaptive",
+    }
+
+    async def async_setup(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+    ) -> None:
+        """Wait for Huawei Solar and resolve its required entities."""
+        await async_wait_for_huawei(hass, registry)
+
+    def get_sem_options(
+        self,
+        entity_key: str,
+        source_options: list[str],
+    ) -> list[str]:
+        """Expose standard SEM working modes instead of Huawei options."""
+        if entity_key != "battery_working_mode":
+            return source_options
+
+        return [
+            self._WORKING_MODE_MAP[option]
+            for option in source_options
+            if option in self._WORKING_MODE_MAP
+        ]
+
+    def to_source_option(
+        self,
+        entity_key: str,
+        sem_option: str,
+        source_options: list[str],
+    ) -> str:
+        """Translate a standard SEM working mode into a Huawei option."""
+        if entity_key != "battery_working_mode":
+            return super().to_source_option(
+                entity_key,
+                sem_option,
+                source_options,
+            )
+
+        reverse_map = {
+            sem_value: source_value
+            for source_value, sem_value in self._WORKING_MODE_MAP.items()
+        }
+        source_option = reverse_map.get(sem_option)
+
+        if source_option is None or source_option not in source_options:
+            raise ValueError(
+                f"Unsupported SEM battery working mode: {sem_option}"
+            )
+
+        return source_option
+
+    def to_sem_option(
+        self,
+        entity_key: str,
+        source_option: str,
+    ) -> str | None:
+        """Translate a Huawei working mode into its SEM value."""
+        if entity_key != "battery_working_mode":
+            return source_option
+
+        return self._WORKING_MODE_MAP.get(source_option)
+
+    async def async_execute(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        command: str,
+        data: dict[str, Any],
+    ) -> None:
+        """Execute a supported Huawei-specific operation for SEM."""
+        if command == "set_tou_periods":
+            service = "set_tou_periods"
+            device_key = "battery_working_mode"
+            required = {"periods"}
+            service_data = {
+                "periods": data.get("periods"),
+            }
+
+        elif command == "set_maximum_feed_grid_power":
+            service = "set_maximum_feed_grid_power"
+            device_key = "inverter_input_power"
+            required = {"power"}
+            service_data = {
+                "power": data.get("power"),
+            }
+
+        elif command == "reset_maximum_feed_grid_power":
+            service = "reset_maximum_feed_grid_power"
+            device_key = "inverter_input_power"
+            required = set()
+            service_data = {}
+
+        else:
+            raise HomeAssistantError(
+                f"Unsupported SEM command for Huawei: {command}"
+            )
+
+        missing = [
+            key
+            for key in required
+            if key not in data
+        ]
+        if missing:
+            raise HomeAssistantError(
+                f"Missing data for SEM command {command}: {missing}"
+            )
+
+        device_id = registry.get_entity_device_id(
+            HUAWEI_SYSTEM_ID,
+            device_key,
+        )
+        if device_id is None:
+            raise HomeAssistantError(
+                f"No Huawei device found for SEM command {command}"
+            )
+
+        if not hass.services.has_service(HUAWEI_DOMAIN, service):
+            raise HomeAssistantError(
+                f"Huawei service is not available: {service}"
+            )
+
+        await hass.services.async_call(
+            HUAWEI_DOMAIN,
+            service,
+            {
+                "device_id": device_id,
+                **service_data,
+            },
+            blocking=True,
+        )
