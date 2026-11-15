@@ -11,7 +11,7 @@ from homeassistant.exceptions import HomeAssistantError
 
 from .adapter import SemSystemAdapter
 from .entity_resolver import EntityRegistryMatch, find_registry_entities
-from .registry import SemEntityRegistry
+from .registry import EntitySource, SemEntityRegistry
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -83,6 +83,23 @@ HUAWEI_ENTITY_MAP: Final[dict[str, HuaweiEntityDefinition]] = {
 }
 
 
+def _to_entity_sources(
+    matches: list[EntityRegistryMatch],
+) -> list[EntitySource]:
+    """Convert registry matches into SEM physical source records."""
+    return [
+        EntitySource(
+            entity_id=entity.entity_id,
+            unique_id=entity.unique_id,
+            platform=HUAWEI_DOMAIN,
+            device_id=entity.device_id,
+            parent_device_id=entity.parent_device_id,
+            config_entry_id=entity.config_entry_id,
+        )
+        for entity in matches
+    ]
+
+
 def resolve_huawei_entities(
     hass: HomeAssistant,
 ) -> dict[str, list[EntityRegistryMatch]]:
@@ -123,6 +140,7 @@ def register_huawei_entities(
                 entity.device_id
                 for entity in battery_entities
                 if entity.device_id is not None
+                and entity.disabled_by is None
             }
 
             active_by_device = {
@@ -158,6 +176,10 @@ def register_huawei_entities(
                     status="disabled",
                     platform=HUAWEI_DOMAIN,
                     matches=disabled_ids,
+                    sources=_to_entity_sources([
+                        disabled_by_device[device_id]
+                        for device_id in disabled_batteries
+                    ]),
                 )
                 _LOGGER.error(
                     "Huawei resolver: Rated Capacity is disabled for battery device IDs: %s. "
@@ -176,17 +198,25 @@ def register_huawei_entities(
                     status="missing",
                     platform=HUAWEI_DOMAIN,
                     matches=missing_ids,
+                    sources=_to_entity_sources([
+                        active_by_device[device_id]
+                        for device_id in sorted(active_by_device)
+                        if device_id in battery_device_ids
+                    ]),
                 )
                 _LOGGER.error(
                     "Huawei resolver: Rated Capacity is missing for battery device IDs: %s.",
                     missing_batteries or "no battery devices identified",
                 )
             else:
-                active_ids = [
-                    active_by_device[device_id].entity_id
+                capacity_matches = [
+                    active_by_device[device_id]
                     for device_id in sorted(battery_device_ids)
                 ]
-                first = active_by_device[sorted(battery_device_ids)[0]]
+                active_ids = [
+                    entity.entity_id for entity in capacity_matches
+                ]
+                first = capacity_matches[0]
                 sem_registry.set_entity_result(
                     HUAWEI_SYSTEM_ID,
                     function,
@@ -197,6 +227,7 @@ def register_huawei_entities(
                     device_id=first.device_id,
                     config_entry_id=first.config_entry_id,
                     matches=active_ids,
+                    sources=_to_entity_sources(capacity_matches),
                 )
                 _LOGGER.info(
                     "Huawei resolver: Rated Capacity is enabled for all %s battery systems: %s",
@@ -221,6 +252,7 @@ def register_huawei_entities(
                 device_id=entity.device_id,
                 config_entry_id=entity.config_entry_id,
                 matches=[entity.entity_id],
+                sources=_to_entity_sources(active),
             )
 
             _LOGGER.info(
@@ -240,11 +272,13 @@ def register_huawei_entities(
                 status="ambiguous",
                 platform=HUAWEI_DOMAIN,
                 matches=match_ids,
+                sources=_to_entity_sources(active),
             )
 
             _LOGGER.error(
                 "Huawei resolver: Multiple matches for %s: %s. "
-                "A specific Huawei device must be selected.",
+                "All physical sources have been recorded, but aggregation "
+                "is not enabled yet.",
                 function,
                 match_ids,
             )
@@ -258,6 +292,7 @@ def register_huawei_entities(
                 status="disabled",
                 platform=HUAWEI_DOMAIN,
                 matches=match_ids,
+                sources=_to_entity_sources(disabled),
             )
 
             _LOGGER.warning(
@@ -379,9 +414,8 @@ async def async_wait_for_huawei(
     )
 
 
-
 class HuaweiSolarAdapter(SemSystemAdapter):
-    """Adapter for the Huawei Solar Home Assistant integration."""
+    """Adapter for the Huawei Solar integration."""
 
     system_id = HUAWEI_SYSTEM_ID
     integration_domain = HUAWEI_DOMAIN
