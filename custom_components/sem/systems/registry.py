@@ -116,6 +116,22 @@ class SemEntityRegistry:
 
         self._notify()
 
+    def get_entity_id(
+        self,
+        system_id: str,
+        entity_key: str,
+    ) -> str | None:
+        """Return a resolved entity ID for a logical system entity."""
+        system = self._systems.get(system_id)
+        if system is None:
+            return None
+
+        result = system.entities.get(entity_key)
+        if result is None or result.status != "found":
+            return None
+
+        return result.entity_id
+
     def get_status(self) -> str:
         """Return the overall SEM entity status."""
 
