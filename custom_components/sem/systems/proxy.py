@@ -59,7 +59,7 @@ class SemEntityProxyMixin:
         self._attr_unique_id = f"sem_{entity_key}"
         self._attr_icon = icon
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, "huawei_entity_bridge")},
+            identifiers={(DOMAIN, "system_adapter_bridge")},
             name="SEM Energy System",
             manufacturer="SEM",
             model="Energy system adapter",
@@ -118,7 +118,7 @@ class SemEntityProxyMixin:
 
     @property
     def source_state(self) -> State | None:
-        """Return the current state of the resolved Huawei entity."""
+        """Return the current state of the resolved source entity."""
         if self._source_entity_id is None:
             return None
         return self.hass.states.get(self._source_entity_id)
