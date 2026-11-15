@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, State
 
 from .registry import SemEntityRegistry
 
@@ -23,6 +23,73 @@ class SemSystemAdapter(ABC):
         registry: SemEntityRegistry,
     ) -> None:
         """Detect and resolve the external system."""
+
+    def get_sensor_value(
+        self,
+        entity_key: str,
+        source_state: State | None,
+    ) -> float | str | None:
+        """Return a normalized sensor value for a SEM logical entity."""
+        if source_state is None or source_state.state in (
+            "unknown",
+            "unavailable",
+        ):
+            return None
+
+        try:
+            return float(source_state.state)
+        except (TypeError, ValueError):
+            return source_state.state
+
+    def get_sensor_metadata(
+        self,
+        entity_key: str,
+        source_attributes: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return standardized measurement metadata for a SEM sensor."""
+        return {
+            "device_class": source_attributes.get("device_class"),
+            "state_class": source_attributes.get("state_class"),
+            "unit_of_measurement": source_attributes.get(
+                "unit_of_measurement"
+            ),
+            "suggested_display_precision": source_attributes.get(
+                "suggested_display_precision"
+            ),
+        }
+
+    def get_number_value(
+        self,
+        entity_key: str,
+        source_state: State | None,
+    ) -> float | None:
+        """Return a normalized numeric value for a SEM number entity."""
+        if source_state is None or source_state.state in (
+            "unknown",
+            "unavailable",
+        ):
+            return None
+
+        try:
+            return float(source_state.state)
+        except (TypeError, ValueError):
+            return None
+
+    def get_number_metadata(
+        self,
+        entity_key: str,
+        source_attributes: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return standardized capabilities for a SEM number entity."""
+        return {
+            "min_value": source_attributes.get("min", 0),
+            "max_value": source_attributes.get("max", 100),
+            "step": source_attributes.get("step", 1),
+            "unit_of_measurement": source_attributes.get(
+                "unit_of_measurement"
+            ),
+            "mode": source_attributes.get("mode", "auto"),
+        }
 
     def get_sem_options(
         self,
