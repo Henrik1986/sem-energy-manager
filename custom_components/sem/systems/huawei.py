@@ -203,9 +203,9 @@ def register_huawei_entities(
                     sources=_to_entity_sources(
                         function,
                         [
-                        disabled_by_device[device_id]
-                        for device_id in disabled_batteries
-                    ]
+                            disabled_by_device[device_id]
+                            for device_id in disabled_batteries
+                        ],
                     ),
                 )
                 _LOGGER.error(
@@ -228,10 +228,10 @@ def register_huawei_entities(
                     sources=_to_entity_sources(
                         function,
                         [
-                        active_by_device[device_id]
-                        for device_id in sorted(active_by_device)
-                        if device_id in battery_device_ids
-                    ]
+                            active_by_device[device_id]
+                            for device_id in sorted(active_by_device)
+                            if device_id in battery_device_ids
+                        ],
                     ),
                 )
                 _LOGGER.error(
@@ -257,7 +257,7 @@ def register_huawei_entities(
                     device_id=first.device_id,
                     config_entry_id=first.config_entry_id,
                     matches=active_ids,
-                    sources=_to_entity_sources(capacity_matches),
+                    sources=_to_entity_sources(function, capacity_matches),
                 )
                 _LOGGER.info(
                     "Huawei resolver: Rated Capacity is enabled for all %s battery systems: %s",
