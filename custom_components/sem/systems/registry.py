@@ -31,6 +31,7 @@ class EntitySource:
     device_id: str | None = None
     parent_device_id: str | None = None
     root_device_id: str | None = None
+    owner_device_id: str | None = None
     config_entry_id: str | None = None
 
 
@@ -325,6 +326,7 @@ class SemEntityRegistry:
                             "device_id": source.device_id,
                             "parent_device_id": source.parent_device_id,
                             "root_device_id": source.root_device_id,
+                            "owner_device_id": source.owner_device_id,
                             "config_entry_id": source.config_entry_id,
                         }
                         for source in result.sources
