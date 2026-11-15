@@ -235,7 +235,6 @@ def _store_expected_sources(
     active: Sequence[EntityRegistryMatch],
     disabled: Sequence[EntityRegistryMatch],
     expected_ids: Sequence[str],
-    index_by: str,
 ) -> None:
     """Store one source for every expected physical device."""
     active_index = _matches_by_key(active, key=entity_key)
@@ -436,7 +435,6 @@ def register_huawei_entities(
         active=capacity_active,
         disabled=capacity_disabled,
         expected_ids=battery_device_ids,
-        index_by="device_id",
     )
 
     for entity_key in (
@@ -457,7 +455,6 @@ def register_huawei_entities(
                 if entity.disabled_by is not None
             ],
             expected_ids=battery_device_ids,
-            index_by="device_id",
         )
 
     # One inverter input-power entity is required for every inverter which has
@@ -543,7 +540,6 @@ def register_huawei_entities(
                 if entity.disabled_by is not None
             ],
             expected_ids=battery_owner_ids,
-            index_by="owner_device_id",
         )
 
     # The grid meter is plant-wide, not additive. Keep all candidates so the
@@ -678,19 +674,6 @@ class HuaweiSolarAdapter(SemSystemAdapter):
         if self._registry is None:
             return []
         return self._registry.get_entity_sources(HUAWEI_SYSTEM_ID, entity_key)
-
-    def _states_by_device(
-        self,
-        entity_key: str,
-    ) -> dict[str, State | None]:
-        """Return source states indexed by their physical device IDs."""
-        if self._hass is None:
-            return {}
-        return {
-            source.device_id: self._hass.states.get(source.entity_id)
-            for source in self._sources(entity_key)
-            if source.device_id is not None
-        }
 
     def _battery_device_ids(self) -> set[str]:
         return {
@@ -954,12 +937,10 @@ class HuaweiSolarAdapter(SemSystemAdapter):
         """Execute a Huawei command against every applicable physical device."""
         if command == "set_battery_time_of_use_periods":
             service = "set_tou_periods"
-            device_key = "battery_working_mode"
             required = {"periods"}
             service_data = {"periods": data.get("periods")}
         elif command == "set_grid_export_power_limit":
             service = "set_maximum_feed_grid_power"
-            device_key = "inverter_input_power"
             required = {"power"}
             service_data = {"power": data.get("power")}
         elif command == "reset_grid_export_power_limit":
