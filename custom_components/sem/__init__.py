@@ -6,11 +6,14 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import config_validation as cv
 
 from .const import DOMAIN
 from .systems.adapters import create_system_adapters
 from .systems.manager import SemSystemManager
 from .systems.registry import SemEntityRegistry
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 PLATFORMS = [Platform.SENSOR, Platform.SELECT, Platform.NUMBER]
 
