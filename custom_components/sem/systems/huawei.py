@@ -141,6 +141,51 @@ def resolve_huawei_entities(
     return resolved
 
 
+@dataclass
+class HuaweiInverterGroup:
+    """All Huawei entities that belong to one physical inverter."""
+
+    inverter_device_id: str
+    root_device_id: str | None
+    config_entry_ids: set[str]
+    entities: dict[str, list[EntitySource]]
+
+
+def get_huawei_inverter_groups(
+    sem_registry: SemEntityRegistry,
+) -> dict[str, HuaweiInverterGroup]:
+    """Group all discovered Huawei entity sources by their owning inverter."""
+    groups: dict[str, HuaweiInverterGroup] = {}
+
+    for entity_key in HUAWEI_ENTITY_MAP:
+        for source in sem_registry.get_entity_sources(
+            HUAWEI_SYSTEM_ID,
+            entity_key,
+        ):
+            inverter_device_id = (
+                source.owner_device_id or source.device_id
+            )
+            if inverter_device_id is None:
+                continue
+
+            group = groups.get(inverter_device_id)
+            if group is None:
+                group = HuaweiInverterGroup(
+                    inverter_device_id=inverter_device_id,
+                    root_device_id=source.root_device_id,
+                    config_entry_ids=set(),
+                    entities={},
+                )
+                groups[inverter_device_id] = group
+
+            if source.config_entry_id is not None:
+                group.config_entry_ids.add(source.config_entry_id)
+
+            group.entities.setdefault(entity_key, []).append(source)
+
+    return dict(sorted(groups.items()))
+
+
 def register_huawei_entities(
     hass: HomeAssistant,
     sem_registry: SemEntityRegistry,
