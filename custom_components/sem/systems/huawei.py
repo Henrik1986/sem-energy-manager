@@ -83,22 +83,45 @@ HUAWEI_ENTITY_MAP: Final[dict[str, HuaweiEntityDefinition]] = {
 }
 
 
+# These entities are attached to the battery or meter child device in HA.
+# Their parent device is the inverter that owns the physical system.
+HUAWEI_CHILD_DEVICE_ENTITY_KEYS: Final[frozenset[str]] = frozenset({
+    "battery_working_mode",
+    "battery_state_of_capacity",
+    "battery_rated_capacity",
+    "battery_charge_discharge_power",
+    "battery_day_charge",
+    "battery_day_discharge",
+    "power_meter_active_power",
+})
+
+
 def _to_entity_sources(
+    entity_key: str,
     matches: list[EntityRegistryMatch],
 ) -> list[EntitySource]:
-    """Convert registry matches into SEM physical source records."""
-    return [
-        EntitySource(
-            entity_id=entity.entity_id,
-            unique_id=entity.unique_id,
-            platform=HUAWEI_DOMAIN,
-            device_id=entity.device_id,
-            parent_device_id=entity.parent_device_id,
-            root_device_id=entity.root_device_id,
-            config_entry_id=entity.config_entry_id,
+    """Convert registry matches into physical sources with inverter ownership."""
+    sources = []
+
+    for entity in matches:
+        owner_device_id = entity.device_id
+        if entity_key in HUAWEI_CHILD_DEVICE_ENTITY_KEYS:
+            owner_device_id = entity.parent_device_id or entity.device_id
+
+        sources.append(
+            EntitySource(
+                entity_id=entity.entity_id,
+                unique_id=entity.unique_id,
+                platform=HUAWEI_DOMAIN,
+                device_id=entity.device_id,
+                parent_device_id=entity.parent_device_id,
+                root_device_id=entity.root_device_id,
+                owner_device_id=owner_device_id,
+                config_entry_id=entity.config_entry_id,
+            )
         )
-        for entity in matches
-    ]
+
+    return sources
 
 
 def resolve_huawei_entities(
@@ -177,10 +200,13 @@ def register_huawei_entities(
                     status="disabled",
                     platform=HUAWEI_DOMAIN,
                     matches=disabled_ids,
-                    sources=_to_entity_sources([
+                    sources=_to_entity_sources(
+                        function,
+                        [
                         disabled_by_device[device_id]
                         for device_id in disabled_batteries
-                    ]),
+                    ]
+                    ),
                 )
                 _LOGGER.error(
                     "Huawei resolver: Rated Capacity is disabled for battery device IDs: %s. "
@@ -199,11 +225,14 @@ def register_huawei_entities(
                     status="missing",
                     platform=HUAWEI_DOMAIN,
                     matches=missing_ids,
-                    sources=_to_entity_sources([
+                    sources=_to_entity_sources(
+                        function,
+                        [
                         active_by_device[device_id]
                         for device_id in sorted(active_by_device)
                         if device_id in battery_device_ids
-                    ]),
+                    ]
+                    ),
                 )
                 _LOGGER.error(
                     "Huawei resolver: Rated Capacity is missing for battery device IDs: %s.",
@@ -253,7 +282,7 @@ def register_huawei_entities(
                 device_id=entity.device_id,
                 config_entry_id=entity.config_entry_id,
                 matches=[entity.entity_id],
-                sources=_to_entity_sources(active),
+                sources=_to_entity_sources(function, active),
             )
 
             _LOGGER.info(
@@ -273,7 +302,7 @@ def register_huawei_entities(
                 status="ambiguous",
                 platform=HUAWEI_DOMAIN,
                 matches=match_ids,
-                sources=_to_entity_sources(active),
+                sources=_to_entity_sources(function, active),
             )
 
             _LOGGER.error(
@@ -293,7 +322,7 @@ def register_huawei_entities(
                 status="disabled",
                 platform=HUAWEI_DOMAIN,
                 matches=match_ids,
-                sources=_to_entity_sources(disabled),
+                sources=_to_entity_sources(function, disabled),
             )
 
             _LOGGER.warning(
