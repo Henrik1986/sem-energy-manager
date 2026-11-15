@@ -1,7 +1,11 @@
 import logging
 from pathlib import Path
 
-from homeassistant.components.sensor import SensorEntity
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorStateClass,
+)
 from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
@@ -164,8 +168,22 @@ class SemHuaweiSensor(SemHuaweiProxyMixin, SensorEntity):
         state = self.source_state
         attributes = state.attributes if state is not None else {}
 
-        self._attr_device_class = attributes.get("device_class")
-        self._attr_state_class = attributes.get("state_class")
+        device_class = attributes.get("device_class")
+        state_class = attributes.get("state_class")
+
+        try:
+            self._attr_device_class = (
+                SensorDeviceClass(device_class) if device_class else None
+            )
+        except ValueError:
+            self._attr_device_class = None
+
+        try:
+            self._attr_state_class = (
+                SensorStateClass(state_class) if state_class else None
+            )
+        except ValueError:
+            self._attr_state_class = None
         self._attr_native_unit_of_measurement = attributes.get(
             "unit_of_measurement"
         )
