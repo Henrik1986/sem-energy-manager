@@ -4,6 +4,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import HomeAssistantError
+import voluptuous as vol
 
 from .const import DOMAIN
 from .systems.adapters import create_system_adapters
@@ -12,23 +13,28 @@ from .systems.registry import SemEntityRegistry
 
 PLATFORMS = [Platform.SENSOR, Platform.SELECT, Platform.NUMBER]
 
-SEM_COMMAND_SERVICES = (
-    "set_battery_time_of_use_periods",
-    "set_grid_export_power_limit",
-    "reset_grid_export_power_limit",
-)
+SEM_COMMAND_SCHEMAS = {
+    "set_battery_time_of_use_periods": vol.Schema(
+        {vol.Required("periods"): str}
+    ),
+    "set_grid_export_power_limit": vol.Schema(
+        {vol.Required("power"): vol.Any(str, int, float)}
+    ),
+    "reset_grid_export_power_limit": vol.Schema({}),
+}
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     """Set up the SEM integration and its system-independent services."""
     hass.data.setdefault(DOMAIN, {})
 
-    for command in SEM_COMMAND_SERVICES:
+    for command, schema in SEM_COMMAND_SCHEMAS.items():
         if not hass.services.has_service(DOMAIN, command):
             hass.services.async_register(
                 DOMAIN,
                 command,
                 _create_command_handler(hass, command),
+                schema=schema,
             )
 
     return True
