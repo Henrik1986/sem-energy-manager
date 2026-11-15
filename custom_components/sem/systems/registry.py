@@ -116,6 +116,35 @@ class SemEntityRegistry:
 
         self._notify()
 
+    def get_active_system_id(self) -> str | None:
+        """Return the only configured system, or None if ambiguous."""
+        configured = [
+            system_id
+            for system_id, system in self._systems.items()
+            if system.configured
+        ]
+
+        if len(configured) != 1:
+            return None
+
+        return configured[0]
+
+    def get_entity_device_id(
+        self,
+        system_id: str,
+        entity_key: str,
+    ) -> str | None:
+        """Return the device ID for a resolved system entity."""
+        system = self._systems.get(system_id)
+        if system is None:
+            return None
+
+        result = system.entities.get(entity_key)
+        if result is None or result.status != "found":
+            return None
+
+        return result.device_id
+
     def get_entity_id(
         self,
         system_id: str,
