@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import math
-from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
@@ -60,17 +59,29 @@ def capacity_weighted_soc(
     return weighted_sum / total_capacity
 
 
-def common_numeric_value(values: Sequence[Any]) -> float | None:
-    """Return a shared number value, or None when sources disagree."""
+def plant_meter_value(
+    values: Sequence[Any],
+    *,
+    absolute_tolerance: float = 100.0,
+    relative_tolerance: float = 0.02,
+) -> float | None:
+    """Return one plant meter value without adding duplicate meter readings."""
     parsed = [parse_numeric(value) for value in values]
     if not parsed or any(value is None for value in parsed):
         return None
 
-    first = parsed[0]
-    assert first is not None
-    if any(not math.isclose(value, first, rel_tol=0, abs_tol=1e-6) for value in parsed[1:] if value is not None):
+    valid = [value for value in parsed if value is not None]
+    if len(valid) == 1:
+        return valid[0]
+
+    tolerance = max(
+        absolute_tolerance,
+        max(abs(value) for value in valid) * relative_tolerance,
+    )
+    if max(valid) - min(valid) > tolerance:
         return None
-    return first
+
+    return sum(valid) / len(valid)
 
 
 def common_number_metadata(
@@ -160,37 +171,3 @@ def common_sem_options(
         for option in source_options[0]
         if option in source_to_sem and source_to_sem[option] in common
     ]
-
-
-def select_primary_power_meters(
-    sources: Sequence[Any],
-) -> tuple[list[Any], bool]:
-    """Choose one meter per independent inverter root, rejecting ambiguity."""
-    grouped: dict[str, list[Any]] = defaultdict(list)
-    for source in sources:
-        group_id = (
-            getattr(source, "root_device_id", None)
-            or getattr(source, "config_entry_id", None)
-            or getattr(source, "device_id", None)
-        )
-        if group_id is None:
-            return [], True
-        grouped[group_id].append(source)
-
-    selected = []
-    for root_id, candidates in grouped.items():
-        root_meters = [
-            source
-            for source in candidates
-            if getattr(source, "owner_device_id", None) == root_id
-        ]
-        if len(root_meters) == 1:
-            selected.append(root_meters[0])
-        elif len(root_meters) > 1:
-            return [], True
-        elif len(candidates) == 1:
-            selected.append(candidates[0])
-        else:
-            return [], True
-
-    return selected, False
