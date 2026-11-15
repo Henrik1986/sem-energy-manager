@@ -1,3 +1,5 @@
+"""SEM sensors for installation, diagnostics and aggregated energy values."""
+
 import logging
 from pathlib import Path
 
@@ -21,33 +23,20 @@ async def async_setup_entry(
     entry: ConfigEntry,
     async_add_entities,
 ) -> None:
-
+    """Set up SEM sensors."""
     package_path = hass.config.path("sem")
+    info = await hass.async_add_executor_job(check_installation, package_path)
 
-    info = await hass.async_add_executor_job(
-        check_installation, package_path
-    )
-
-    entities = [
-        SemInstallationStatusSensor(info)
-    ]
-
-    entity_registry = hass.data[DOMAIN]["entity_registries"].get(
-        entry.entry_id
-    )
-    system_manager = hass.data[DOMAIN]["system_managers"].get(
-        entry.entry_id
-    )
+    entities = [SemInstallationStatusSensor(info)]
+    entity_registry = hass.data[DOMAIN]["entity_registries"].get(entry.entry_id)
+    system_manager = hass.data[DOMAIN]["system_managers"].get(entry.entry_id)
 
     if entity_registry is not None and system_manager is not None:
-        entities.append(
-            SemEntityStatusSensor(entity_registry)
-        )
+        entities.append(SemEntityStatusSensor(entity_registry, system_manager))
         entities.extend(
             SemSystemSensor(system_manager, *definition)
             for definition in SENSOR_ENTITY_DEFINITIONS
         )
-
     else:
         _LOGGER.error("SEM entity registry not found")
 
@@ -55,8 +44,8 @@ async def async_setup_entry(
 
 
 def check_installation(package_path: str) -> dict:
+    """Check whether the SEM YAML package exists."""
     path = Path(package_path)
-
     if not path.is_dir():
         return {
             "status": "Väntar",
@@ -69,7 +58,6 @@ def check_installation(package_path: str) -> dict:
         for file in path.rglob("*")
         if file.is_file() and file.suffix.lower() in (".yaml", ".yml")
     )
-
     if not yaml_files:
         return {
             "status": "Fel",
@@ -85,6 +73,7 @@ def check_installation(package_path: str) -> dict:
 
 
 class SemInstallationStatusSensor(SensorEntity):
+    """Report the state of the SEM package installation."""
 
     _attr_has_entity_name = True
     _attr_name = "Installation Status"
@@ -101,13 +90,15 @@ class SemInstallationStatusSensor(SensorEntity):
 
 
 class SemEntityStatusSensor(SensorEntity):
+    """Expose resolver status and live multi-device diagnostics."""
 
     _attr_has_entity_name = True
     _attr_name = "Entity Status"
     _attr_icon = "mdi:database-check"
 
-    def __init__(self, registry: SemEntityRegistry) -> None:
+    def __init__(self, registry: SemEntityRegistry, manager) -> None:
         self._registry = registry
+        self._manager = manager
         self._attr_unique_id = "sem_entity_status"
 
     @property
@@ -119,6 +110,7 @@ class SemEntityStatusSensor(SensorEntity):
         attributes = self._registry.as_dict()
         attributes.pop("status", None)
         attributes["setup_errors"] = self._get_setup_errors(attributes)
+        attributes["runtime_diagnostics"] = self._manager.get_runtime_diagnostics()
         return attributes
 
     @staticmethod
@@ -126,9 +118,7 @@ class SemEntityStatusSensor(SensorEntity):
         """Build actionable setup errors for required system entities."""
         errors = []
         huawei = attributes.get("systems", {}).get("huawei", {})
-        capacity = huawei.get("entities", {}).get(
-            "battery_rated_capacity", {}
-        )
+        capacity = huawei.get("entities", {}).get("battery_rated_capacity", {})
         status = capacity.get("status")
 
         if status == "disabled":
@@ -162,11 +152,8 @@ class SemEntityStatusSensor(SensorEntity):
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
-
         self.async_on_remove(
-            self._registry.add_listener(
-                self._handle_registry_update
-            )
+            self._registry.add_listener(self._handle_registry_update)
         )
 
     @callback
@@ -174,17 +161,10 @@ class SemEntityStatusSensor(SensorEntity):
         self.async_write_ha_state()
 
 
-
 class SemSystemSensor(SemEntityProxyMixin, SensorEntity):
-    """A stable SEM sensor backed by the active system adapter."""
+    """A stable SEM sensor backed by aggregated physical source entities."""
 
-    def __init__(
-        self,
-        manager,
-        entity_key: str,
-        name: str,
-        icon: str,
-    ) -> None:
+    def __init__(self, manager, entity_key: str, name: str, icon: str) -> None:
         SemEntityProxyMixin.__init__(
             self,
             manager,
@@ -195,16 +175,19 @@ class SemSystemSensor(SemEntityProxyMixin, SensorEntity):
 
     @property
     def native_value(self):
-        """Return the normalized value from the active system adapter."""
+        """Return the normalized plant-level value."""
         return self._manager.get_sensor_value(
             self._entity_key,
-            self.source_state,
+            self.source_states,
         )
 
     def _update_from_source(self) -> None:
-        """Mirror normalized measurement metadata from the adapter."""
-        state = self.source_state
-        attributes = state.attributes if state is not None else {}
+        """Mirror common measurement metadata from all physical sources."""
+        attributes = [
+            state.attributes
+            for state in self.source_states
+            if state is not None
+        ]
         metadata = self._manager.get_sensor_metadata(
             self._entity_key,
             attributes,
@@ -212,7 +195,6 @@ class SemSystemSensor(SemEntityProxyMixin, SensorEntity):
 
         device_class = metadata.get("device_class")
         state_class = metadata.get("state_class")
-
         try:
             self._attr_device_class = (
                 SensorDeviceClass(device_class) if device_class else None
@@ -226,6 +208,7 @@ class SemSystemSensor(SemEntityProxyMixin, SensorEntity):
             )
         except ValueError:
             self._attr_state_class = None
+
         self._attr_native_unit_of_measurement = metadata.get(
             "unit_of_measurement"
         )
@@ -235,5 +218,5 @@ class SemSystemSensor(SemEntityProxyMixin, SensorEntity):
 
     @property
     def extra_state_attributes(self) -> dict:
-        """Expose the source entity used for this value."""
-        return {"source_entity_id": self._source_entity_id}
+        """Expose every physical source entity used by this sensor."""
+        return {"source_entity_ids": list(self._source_entity_ids)}
