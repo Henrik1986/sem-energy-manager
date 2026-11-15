@@ -7,6 +7,7 @@ import logging
 from typing import Any
 
 from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import HomeAssistantError
 
 from .adapter import SemSystemAdapter
 from .registry import SemEntityRegistry
@@ -131,7 +132,7 @@ class SemSystemManager:
         """Execute a generic SEM command through the active adapter."""
         adapter = self.active_adapter
         if adapter is None:
-            raise RuntimeError(
+            raise HomeAssistantError(
                 "No unambiguous SEM energy-system adapter is active"
             )
 
