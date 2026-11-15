@@ -94,6 +94,7 @@ def _to_entity_sources(
             platform=HUAWEI_DOMAIN,
             device_id=entity.device_id,
             parent_device_id=entity.parent_device_id,
+            root_device_id=entity.root_device_id,
             config_entry_id=entity.config_entry_id,
         )
         for entity in matches
