@@ -15,8 +15,31 @@ class EntityRegistryMatch:
     unique_id: str
     device_id: str | None
     parent_device_id: str | None
+    root_device_id: str | None
     config_entry_id: str | None
     disabled_by: str | None
+
+
+def _get_root_device_id(
+    device_registry: dr.DeviceRegistry,
+    device_id: str | None,
+) -> str | None:
+    """Return the highest parent device in a device hierarchy."""
+    current_device_id = device_id
+    visited: set[str] = set()
+
+    while current_device_id is not None:
+        if current_device_id in visited:
+            break
+        visited.add(current_device_id)
+
+        device = device_registry.devices.get(current_device_id)
+        if device is None or device.via_device_id is None:
+            return current_device_id
+
+        current_device_id = device.via_device_id
+
+    return current_device_id or device_id
 
 
 def find_registry_entities(
@@ -58,6 +81,9 @@ def find_registry_entities(
                 device_id=entry.device_id,
                 parent_device_id=(
                     device.via_device_id if device is not None else None
+                ),
+                root_device_id=_get_root_device_id(
+                    device_registry, entry.device_id
                 ),
                 config_entry_id=entry.config_entry_id,
                 disabled_by=disabled_by,
