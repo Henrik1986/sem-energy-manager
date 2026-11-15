@@ -1,38 +1,37 @@
-"""SEM number entities backed by resolved Huawei entities."""
+"""SEM number entities backed by the active system adapter."""
 
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
-from .systems.proxy import NUMBER_ENTITY_DEFINITIONS, SemHuaweiProxyMixin
-from .systems.registry import SemEntityRegistry
+from .systems.proxy import NUMBER_ENTITY_DEFINITIONS, SemEntityProxyMixin
 
 
 async def async_setup_entry(hass, entry, async_add_entities) -> None:
     """Set up SEM number entities."""
-    registry = hass.data[DOMAIN]["entity_registries"].get(entry.entry_id)
-    if registry is None:
+    manager = hass.data[DOMAIN]["system_managers"].get(entry.entry_id)
+    if manager is None:
         return
 
     async_add_entities(
-        SemHuaweiNumber(registry, *definition)
+        SemSystemNumber(manager, *definition)
         for definition in NUMBER_ENTITY_DEFINITIONS
     )
 
 
-class SemHuaweiNumber(SemHuaweiProxyMixin, NumberEntity):
-    """A stable SEM number backed by a resolved Huawei number."""
+class SemSystemNumber(SemEntityProxyMixin, NumberEntity):
+    """A stable SEM number backed by the active system adapter."""
 
     def __init__(
         self,
-        registry: SemEntityRegistry,
+        manager,
         entity_key: str,
         name: str,
         icon: str,
     ) -> None:
-        SemHuaweiProxyMixin.__init__(
+        SemEntityProxyMixin.__init__(
             self,
-            registry,
+            manager,
             entity_key=entity_key,
             name=name,
             icon=icon,
@@ -45,7 +44,7 @@ class SemHuaweiNumber(SemHuaweiProxyMixin, NumberEntity):
         self._attr_mode = NumberMode.AUTO
 
     def _update_from_source(self) -> None:
-        """Mirror the value and limits from the Huawei source."""
+        """Mirror the value and limits from the active source."""
         state = self.source_state
         if state is None:
             self._attr_native_value = None
@@ -90,10 +89,10 @@ class SemHuaweiNumber(SemHuaweiProxyMixin, NumberEntity):
             return default
 
     async def async_set_native_value(self, value: float) -> None:
-        """Forward a value change to the Huawei source."""
+        """Forward a value change to the active source."""
         if not self.available:
             raise HomeAssistantError(
-                f"The Huawei entity for {self._entity_key} is unavailable"
+                f"The source entity for {self._entity_key} is unavailable"
             )
 
         await self.async_call_source(
