@@ -34,7 +34,7 @@ def _get_root_device_id(
             break
         visited.add(current_device_id)
 
-        device = device_registry.devices.get(current_device_id)
+        device = device_registry.async_get(current_device_id)
         if device is None or device.via_device_id is None:
             return current_device_id
 
@@ -43,7 +43,7 @@ def _get_root_device_id(
     return current_device_id or device_id
 
 
-def _get_device_type(device: dr.DeviceEntry | None) -> str | None:
+def _get_device_type(device: dr.AnyDeviceEntry | None) -> str | None:
     """Identify Huawei child devices from their integration identifiers."""
     if device is None:
         return None
@@ -90,7 +90,7 @@ def find_registry_entities(
             disabled_by = getattr(disabled_by, "value", str(disabled_by))
 
         device = (
-            device_registry.devices.get(entry.device_id)
+            device_registry.async_get(entry.device_id)
             if entry.device_id is not None
             else None
         )
