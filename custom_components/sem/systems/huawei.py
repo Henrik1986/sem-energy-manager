@@ -705,6 +705,14 @@ class HuaweiSolarAdapter(SemSystemAdapter):
             return None
 
         if entity_key == "battery_state_of_capacity":
+            if (
+                self._registry is None
+                or self._registry.get_entity_status(
+                    HUAWEI_SYSTEM_ID, "battery_rated_capacity"
+                ) != "found"
+            ):
+                return None
+
             soc_sources = self._sources("battery_state_of_capacity")
             cap_sources = self._sources("battery_rated_capacity")
             if len(soc_sources) != len(source_states):
