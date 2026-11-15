@@ -56,10 +56,11 @@ class SemEntityProxyMixin:
 
         self._attr_has_entity_name = False
         self._attr_name = name
-        self._attr_unique_id = f"sem_{entity_key}"
+        # Keep the original unique ID namespace to preserve existing HA entity IDs.
+        self._attr_unique_id = f"sem_huawei_{entity_key}"
         self._attr_icon = icon
         self._attr_device_info = DeviceInfo(
-            identifiers={(DOMAIN, "system_adapter_bridge")},
+            identifiers={(DOMAIN, "huawei_entity_bridge")},
             name="SEM Energy System",
             manufacturer="SEM",
             model="Energy system adapter",
