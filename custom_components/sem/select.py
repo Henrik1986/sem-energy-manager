@@ -1,38 +1,37 @@
-"""SEM select entities backed by resolved Huawei entities."""
+"""SEM select entities backed by the active system adapter."""
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
-from .systems.proxy import SELECT_ENTITY_DEFINITIONS, SemHuaweiProxyMixin
-from .systems.registry import SemEntityRegistry
+from .systems.proxy import SELECT_ENTITY_DEFINITIONS, SemEntityProxyMixin
 
 
 async def async_setup_entry(hass, entry, async_add_entities) -> None:
     """Set up SEM select entities."""
-    registry = hass.data[DOMAIN]["entity_registries"].get(entry.entry_id)
-    if registry is None:
+    manager = hass.data[DOMAIN]["system_managers"].get(entry.entry_id)
+    if manager is None:
         return
 
     async_add_entities(
-        SemHuaweiSelect(registry, *definition)
+        SemSystemSelect(manager, *definition)
         for definition in SELECT_ENTITY_DEFINITIONS
     )
 
 
-class SemHuaweiSelect(SemHuaweiProxyMixin, SelectEntity):
-    """A stable SEM select backed by a resolved Huawei select."""
+class SemSystemSelect(SemEntityProxyMixin, SelectEntity):
+    """A stable SEM select backed by the active system adapter."""
 
     def __init__(
         self,
-        registry: SemEntityRegistry,
+        manager,
         entity_key: str,
         name: str,
         icon: str,
     ) -> None:
-        SemHuaweiProxyMixin.__init__(
+        SemEntityProxyMixin.__init__(
             self,
-            registry,
+            manager,
             entity_key=entity_key,
             name=name,
             icon=icon,
@@ -41,26 +40,48 @@ class SemHuaweiSelect(SemHuaweiProxyMixin, SelectEntity):
         self._attr_current_option = None
 
     def _update_from_source(self) -> None:
-        """Mirror available options and current selection."""
+        """Mirror generic options and current selection."""
         state = self.source_state
         if state is None:
             self._attr_options = []
             self._attr_current_option = None
             return
 
-        self._attr_options = list(state.attributes.get("options", []))
-        self._attr_current_option = state.state
+        source_options = list(state.attributes.get("options", []))
+        self._attr_options = self._manager.get_select_options(
+            self._entity_key,
+            source_options,
+        )
+        self._attr_current_option = self._manager.to_sem_option(
+            self._entity_key,
+            state.state,
+        )
 
     async def async_select_option(self, option: str) -> None:
-        """Forward an option selection to the Huawei source."""
+        """Translate a SEM option and forward it to the active source."""
         if not self.available:
             raise HomeAssistantError(
-                "The Huawei battery working mode entity is unavailable"
+                f"The source entity for {self._entity_key} is unavailable"
             )
+
+        state = self.source_state
+        source_options = (
+            list(state.attributes.get("options", []))
+            if state is not None
+            else []
+        )
+        try:
+            source_option = self._manager.to_source_option(
+                self._entity_key,
+                option,
+                source_options,
+            )
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
 
         await self.async_call_source(
             "select_option",
-            {"option": option},
+            {"option": source_option},
         )
 
     @property
