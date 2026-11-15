@@ -14,6 +14,7 @@ from ..const import DOMAIN
 
 SENSOR_ENTITY_DEFINITIONS = (
     ("battery_state_of_capacity", "SEM Battery SOC", "mdi:battery"),
+    ("battery_rated_capacity", "SEM Battery Rated Capacity", "mdi:battery-high"),
     ("battery_charge_discharge_power", "SEM Battery Power", "mdi:lightning-bolt"),
     ("battery_day_charge", "SEM Battery Day Charge", "mdi:battery-arrow-up"),
     ("battery_day_discharge", "SEM Battery Day Discharge", "mdi:battery-arrow-down"),
