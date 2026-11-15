@@ -2,10 +2,12 @@ import logging
 from pathlib import Path
 
 from homeassistant.components.sensor import SensorEntity
+from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
+from .systems.proxy import SENSOR_ENTITY_DEFINITIONS, SemHuaweiProxyMixin
 from .systems.registry import SemEntityRegistry
 
 _LOGGER = logging.getLogger(__name__)
@@ -35,6 +37,11 @@ async def async_setup_entry(
         entities.append(
             SemEntityStatusSensor(entity_registry)
         )
+        entities.extend(
+            SemHuaweiSensor(entity_registry, *definition)
+            for definition in SENSOR_ENTITY_DEFINITIONS
+        )
+
     else:
         _LOGGER.error("SEM entity registry not found")
 
@@ -119,3 +126,54 @@ class SemEntityStatusSensor(SensorEntity):
     @callback
     def _handle_registry_update(self) -> None:
         self.async_write_ha_state()
+
+
+
+class SemHuaweiSensor(SemHuaweiProxyMixin, SensorEntity):
+    """A stable SEM sensor backed by a resolved Huawei sensor."""
+
+    def __init__(
+        self,
+        registry: SemEntityRegistry,
+        entity_key: str,
+        name: str,
+        icon: str,
+    ) -> None:
+        SemHuaweiProxyMixin.__init__(
+            self,
+            registry,
+            entity_key=entity_key,
+            name=name,
+            icon=icon,
+        )
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the numeric value reported by the Huawei source."""
+        state = self.source_state
+        if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
+            return None
+
+        try:
+            return float(state.state)
+        except (TypeError, ValueError):
+            return None
+
+    def _update_from_source(self) -> None:
+        """Mirror measurement metadata from the Huawei source."""
+        state = self.source_state
+        attributes = state.attributes if state is not None else {}
+
+        self._attr_device_class = attributes.get("device_class")
+        self._attr_state_class = attributes.get("state_class")
+        self._attr_native_unit_of_measurement = attributes.get(
+            "unit_of_measurement"
+        )
+        self._attr_suggested_display_precision = attributes.get(
+            "suggested_display_precision"
+        )
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose the source entity used for this value."""
+        return {"source_entity_id": self._source_entity_id}
