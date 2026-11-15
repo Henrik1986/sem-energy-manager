@@ -19,6 +19,7 @@ from .huawei_aggregation import (
     capacity_weighted_soc,
     common_sem_options,
     common_number_metadata,
+    plant_meter_value,
     parse_numeric,
     sum_numeric_values,
 )
@@ -740,21 +741,9 @@ class HuaweiSolarAdapter(SemSystemAdapter):
             return sum_numeric_values(self._get_state_values(entity_key, source_states))
 
         if entity_key == "power_meter_active_power":
-            values = [
-                parse_numeric(value)
-                for value in self._get_state_values(entity_key, source_states)
-            ]
-            if not values or any(value is None for value in values):
-                return None
-            valid = [value for value in values if value is not None]
-            if len(valid) == 1:
-                return valid[0]
-            tolerance = max(100.0, max(abs(value) for value in valid) * 0.02)
-            if max(valid) - min(valid) > tolerance:
-                return None
-            # Duplicate meter entities may describe the same plant meter.
-            # Average agreeing samples; never add them together.
-            return sum(valid) / len(valid)
+            return plant_meter_value(
+                self._get_state_values(entity_key, source_states)
+            )
 
         return super().get_sensor_value(entity_key, source_states)
 
@@ -891,13 +880,10 @@ class HuaweiSolarAdapter(SemSystemAdapter):
                 parse_numeric(state.state) if state is not None else None,
             ))
         valid_meter_values = [value for _, value in meter_values if value is not None]
-        if len(valid_meter_values) > 1:
-            tolerance = max(
-                100.0,
-                max(abs(value) for value in valid_meter_values) * 0.02,
-            )
-            if max(valid_meter_values) - min(valid_meter_values) > tolerance:
-                mismatches.append({
+        if len(meter_values) > 1 and plant_meter_value(
+            [value for _, value in meter_values]
+        ) is None:
+            mismatches.append({
                     "entity": "power_meter_active_power",
                     "message": (
                         "Several Huawei meter entities report conflicting plant values. "
