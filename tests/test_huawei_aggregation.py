@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from types import SimpleNamespace
 
 MODULE_PATH = (
     Path(__file__).parents[1]
@@ -20,6 +21,7 @@ SPEC.loader.exec_module(huawei_aggregation)
 capacity_weighted_soc = huawei_aggregation.capacity_weighted_soc
 common_number_metadata = huawei_aggregation.common_number_metadata
 common_sem_options = huawei_aggregation.common_sem_options
+group_sources_by_inverter = huawei_aggregation.group_sources_by_inverter
 plant_meter_value = huawei_aggregation.plant_meter_value
 sum_numeric_values = huawei_aggregation.sum_numeric_values
 value_fits_number_metadata = huawei_aggregation.value_fits_number_metadata
@@ -141,3 +143,34 @@ def test_select_options_are_intersected_and_translated() -> None:
         option_map,
     )
     assert result == ["self_consumption"]
+
+
+def test_sources_group_by_physical_inverter_not_master_root() -> None:
+    sources = [
+        SimpleNamespace(
+            owner_device_id="master",
+            device_id="master_battery",
+            root_device_id="master",
+        ),
+        SimpleNamespace(
+            owner_device_id="slave",
+            device_id="slave_battery",
+            root_device_id="master",
+        ),
+        SimpleNamespace(
+            owner_device_id="separate",
+            device_id="separate_battery",
+            root_device_id="separate",
+        ),
+    ]
+    groups = group_sources_by_inverter(sources)
+    assert set(groups) == {"master", "slave", "separate"}
+    assert len(groups["master"]) == 1
+    assert len(groups["slave"]) == 1
+
+
+def test_number_range_requires_a_common_step_grid() -> None:
+    assert common_number_metadata([
+        {"min": 0, "max": 10, "step": 1, "unit_of_measurement": "W"},
+        {"min": 0.5, "max": 10, "step": 1, "unit_of_measurement": "W"},
+    ]) is None
