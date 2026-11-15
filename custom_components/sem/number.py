@@ -1,6 +1,7 @@
 """SEM number entities backed by resolved Huawei entities."""
 
 from homeassistant.components.number import NumberEntity, NumberMode
+from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
 from .systems.proxy import NUMBER_ENTITY_DEFINITIONS, SemHuaweiProxyMixin
@@ -91,7 +92,7 @@ class SemHuaweiNumber(SemHuaweiProxyMixin, NumberEntity):
     async def async_set_native_value(self, value: float) -> None:
         """Forward a value change to the Huawei source."""
         if not self.available:
-            raise ValueError(
+            raise HomeAssistantError(
                 f"The Huawei entity for {self._entity_key} is unavailable"
             )
 
