@@ -10,6 +10,7 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import DOMAIN
 from .systems.proxy import SENSOR_ENTITY_DEFINITIONS, SemEntityProxyMixin
@@ -100,9 +101,14 @@ class SemEntityStatusSensor(SensorEntity):
         self._registry = registry
         self._manager = manager
         self._attr_unique_id = "sem_entity_status"
+        self._source_entity_ids: list[str] = []
+        self._source_unsub = None
 
     @property
     def native_value(self) -> str:
+        diagnostics = self._manager.get_runtime_diagnostics()
+        if diagnostics.get("setting_mismatches"):
+            return "FEL"
         return self._registry.get_status()
 
     @property
@@ -155,9 +161,49 @@ class SemEntityStatusSensor(SensorEntity):
         self.async_on_remove(
             self._registry.add_listener(self._handle_registry_update)
         )
+        self.async_on_remove(self._remove_source_listener)
+        self._refresh_source_listener()
+
+    @callback
+    def _refresh_source_listener(self) -> None:
+        """Subscribe to state changes for every resolved physical source."""
+        source_ids = []
+        for system in self._registry.as_dict().get("systems", {}).values():
+            for entity in system.get("entities", {}).values():
+                source_ids.extend(
+                    source.get("entity_id")
+                    for source in entity.get("sources", [])
+                    if source.get("entity_id")
+                )
+
+        source_ids = sorted(set(source_ids))
+        if source_ids == self._source_entity_ids:
+            return
+
+        self._remove_source_listener()
+        self._source_entity_ids = source_ids
+        if source_ids:
+            self._source_unsub = async_track_state_change_event(
+                self.hass,
+                source_ids,
+                self._handle_source_state_change,
+            )
+
+    @callback
+    def _remove_source_listener(self) -> None:
+        """Remove physical source state subscriptions."""
+        if self._source_unsub is not None:
+            self._source_unsub()
+            self._source_unsub = None
+
+    @callback
+    def _handle_source_state_change(self, event) -> None:
+        """Refresh dynamic mismatch diagnostics after a physical change."""
+        self.async_write_ha_state()
 
     @callback
     def _handle_registry_update(self) -> None:
+        self._refresh_source_listener()
         self.async_write_ha_state()
 
 
