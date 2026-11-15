@@ -38,6 +38,10 @@ HUAWEI_ENTITY_MAP: Final[dict[str, HuaweiEntityDefinition]] = {
         domain="sensor",
         translation_key="storage_state_of_capacity",
     ),
+    "battery_rated_capacity": HuaweiEntityDefinition(
+        domain="sensor",
+        translation_key="storage_rated_capacity",
+    ),
     "battery_charge_discharge_power": HuaweiEntityDefinition(
         domain="sensor",
         translation_key="storage_charge_discharge_power",
@@ -112,6 +116,60 @@ def register_huawei_entities(
     for function, matches in resolved.items():
         active = [entity for entity in matches if entity.disabled_by is None]
         disabled = [entity for entity in matches if entity.disabled_by is not None]
+
+        if function == "battery_rated_capacity":
+            battery_entities = resolved.get("battery_state_of_capacity", [])
+            expected_batteries = len(battery_entities)
+            active_ids = [entity.entity_id for entity in active]
+            disabled_ids = [entity.entity_id for entity in disabled]
+
+            if disabled:
+                sem_registry.set_entity_result(
+                    HUAWEI_SYSTEM_ID,
+                    function,
+                    status="disabled",
+                    platform=HUAWEI_DOMAIN,
+                    matches=disabled_ids,
+                )
+                _LOGGER.error(
+                    "Huawei resolver: Battery rated capacity is disabled for: %s. "
+                    "Enable the Rated Capacity sensor for every battery system.",
+                    disabled_ids,
+                )
+            elif not matches or len(active) < expected_batteries:
+                sem_registry.set_entity_result(
+                    HUAWEI_SYSTEM_ID,
+                    function,
+                    status="missing",
+                    platform=HUAWEI_DOMAIN,
+                    matches=active_ids,
+                )
+                _LOGGER.error(
+                    "Huawei resolver: Battery rated capacity is missing. "
+                    "Found %s enabled capacity entities for %s battery systems.",
+                    len(active),
+                    expected_batteries,
+                )
+            else:
+                first = active[0]
+                sem_registry.set_entity_result(
+                    HUAWEI_SYSTEM_ID,
+                    function,
+                    status="found",
+                    entity_id=first.entity_id,
+                    unique_id=first.unique_id,
+                    platform=HUAWEI_DOMAIN,
+                    device_id=first.device_id,
+                    config_entry_id=first.config_entry_id,
+                    matches=active_ids,
+                )
+                _LOGGER.info(
+                    "Huawei resolver: Found enabled rated capacity entities for %s battery systems: %s",
+                    expected_batteries,
+                    active_ids,
+                )
+
+            continue
 
         if len(active) == 1:
             entity = active[0]
