@@ -11,7 +11,7 @@ from homeassistant.const import STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant, callback
 
 from .const import DOMAIN
-from .systems.proxy import SENSOR_ENTITY_DEFINITIONS, SemHuaweiProxyMixin
+from .systems.proxy import SENSOR_ENTITY_DEFINITIONS, SemEntityProxyMixin
 from .systems.registry import SemEntityRegistry
 
 _LOGGER = logging.getLogger(__name__)
@@ -36,13 +36,16 @@ async def async_setup_entry(
     entity_registry = hass.data[DOMAIN]["entity_registries"].get(
         entry.entry_id
     )
+    system_manager = hass.data[DOMAIN]["system_managers"].get(
+        entry.entry_id
+    )
 
-    if entity_registry is not None:
+    if entity_registry is not None and system_manager is not None:
         entities.append(
             SemEntityStatusSensor(entity_registry)
         )
         entities.extend(
-            SemHuaweiSensor(entity_registry, *definition)
+            SemSystemSensor(system_manager, *definition)
             for definition in SENSOR_ENTITY_DEFINITIONS
         )
 
@@ -133,19 +136,19 @@ class SemEntityStatusSensor(SensorEntity):
 
 
 
-class SemHuaweiSensor(SemHuaweiProxyMixin, SensorEntity):
-    """A stable SEM sensor backed by a resolved Huawei sensor."""
+class SemSystemSensor(SemEntityProxyMixin, SensorEntity):
+    """A stable SEM sensor backed by the active system adapter."""
 
     def __init__(
         self,
-        registry: SemEntityRegistry,
+        manager,
         entity_key: str,
         name: str,
         icon: str,
     ) -> None:
-        SemHuaweiProxyMixin.__init__(
+        SemEntityProxyMixin.__init__(
             self,
-            registry,
+            manager,
             entity_key=entity_key,
             name=name,
             icon=icon,
@@ -153,7 +156,7 @@ class SemHuaweiSensor(SemHuaweiProxyMixin, SensorEntity):
 
     @property
     def native_value(self) -> float | None:
-        """Return the numeric value reported by the Huawei source."""
+        """Return the numeric value reported by the active source."""
         state = self.source_state
         if state is None or state.state in (STATE_UNKNOWN, STATE_UNAVAILABLE):
             return None
@@ -164,7 +167,7 @@ class SemHuaweiSensor(SemHuaweiProxyMixin, SensorEntity):
             return None
 
     def _update_from_source(self) -> None:
-        """Mirror measurement metadata from the Huawei source."""
+        """Mirror measurement metadata from the active source."""
         state = self.source_state
         attributes = state.attributes if state is not None else {}
 
