@@ -54,10 +54,6 @@ HUAWEI_ENTITY_MAP: Final[dict[str, HuaweiEntityDefinition]] = {
         domain="sensor",
         translation_key="input_power",
     ),
-    "inverter_active_power": HuaweiEntityDefinition(
-        domain="sensor",
-        translation_key="inverter_active_power",
-    ),
 
     # Power meter
     "power_meter_active_power": HuaweiEntityDefinition(
