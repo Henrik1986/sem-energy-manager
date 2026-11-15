@@ -1,4 +1,4 @@
-"""SEM select entities backed by the active system adapter."""
+"""SEM select entities backed by all physical source devices."""
 
 from homeassistant.components.select import SelectEntity
 from homeassistant.exceptions import HomeAssistantError
@@ -12,7 +12,6 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
     manager = hass.data[DOMAIN]["system_managers"].get(entry.entry_id)
     if manager is None:
         return
-
     async_add_entities(
         SemSystemSelect(manager, *definition)
         for definition in SELECT_ENTITY_DEFINITIONS
@@ -20,15 +19,9 @@ async def async_setup_entry(hass, entry, async_add_entities) -> None:
 
 
 class SemSystemSelect(SemEntityProxyMixin, SelectEntity):
-    """A stable SEM select backed by the active system adapter."""
+    """A stable SEM select mirrored to every physical battery."""
 
-    def __init__(
-        self,
-        manager,
-        entity_key: str,
-        name: str,
-        icon: str,
-    ) -> None:
+    def __init__(self, manager, entity_key: str, name: str, icon: str) -> None:
         SemEntityProxyMixin.__init__(
             self,
             manager,
@@ -40,38 +33,51 @@ class SemSystemSelect(SemEntityProxyMixin, SelectEntity):
         self._attr_current_option = None
 
     def _update_from_source(self) -> None:
-        """Mirror generic options and current selection."""
-        state = self.source_state
-        if state is None:
+        """Expose only shared options and a shared current value."""
+        states = self.source_states
+        if not states or any(state is None for state in states):
             self._attr_options = []
             self._attr_current_option = None
             return
 
-        source_options = list(state.attributes.get("options", []))
+        source_options = [
+            list(state.attributes.get("options", []))
+            for state in states
+            if state is not None
+        ]
         self._attr_options = self._manager.get_select_options(
             self._entity_key,
             source_options,
         )
+        source_values = [
+            state.state if state is not None else None
+            for state in states
+        ]
         self._attr_current_option = self._manager.to_sem_option(
             self._entity_key,
-            state.state,
+            source_values,
         )
 
     async def async_select_option(self, option: str) -> None:
-        """Translate a SEM option and forward it to the active source."""
+        """Validate and mirror a selected option to every battery."""
         if not self.available:
             raise HomeAssistantError(
-                f"The source entity for {self._entity_key} is unavailable"
+                f"The source entities for {self._entity_key} are unavailable"
             )
 
-        state = self.source_state
-        source_options = (
+        states = self.source_states
+        if not states or any(state is None for state in states):
+            raise HomeAssistantError(
+                f"Not all source entities are available for {self._entity_key}"
+            )
+
+        source_options = [
             list(state.attributes.get("options", []))
+            for state in states
             if state is not None
-            else []
-        )
+        ]
         try:
-            source_option = self._manager.to_source_option(
+            translated_options = self._manager.to_source_options(
                 self._entity_key,
                 option,
                 source_options,
@@ -79,12 +85,21 @@ class SemSystemSelect(SemEntityProxyMixin, SelectEntity):
         except ValueError as err:
             raise HomeAssistantError(str(err)) from err
 
-        await self.async_call_source(
-            "select_option",
-            {"option": source_option},
-        )
+        entity_ids = list(self._source_entity_ids)
+        if len(entity_ids) != len(translated_options):
+            raise HomeAssistantError(
+                f"Source list changed while setting {self._entity_key}"
+            )
+
+        for entity_id, source_option in zip(entity_ids, translated_options):
+            await self.hass.services.async_call(
+                "select",
+                "select_option",
+                {"entity_id": entity_id, "option": source_option},
+                blocking=True,
+            )
 
     @property
     def extra_state_attributes(self) -> dict:
-        """Expose the resolved source entity."""
-        return {"source_entity_id": self._source_entity_id}
+        """Expose every physical select entity."""
+        return {"source_entity_ids": list(self._source_entity_ids)}
