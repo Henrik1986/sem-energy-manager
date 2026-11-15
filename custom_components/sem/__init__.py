@@ -28,13 +28,13 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
             hass.services.async_register(
                 DOMAIN,
                 command,
-                _create_command_handler(command),
+                _create_command_handler(hass, command),
             )
 
     return True
 
 
-def _create_command_handler(command: str):
+def _create_command_handler(hass: HomeAssistant, command: str):
     """Create a handler for a generic SEM command."""
 
     async def handle_service(call: ServiceCall) -> None:
