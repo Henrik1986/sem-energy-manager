@@ -330,64 +330,94 @@ def register_huawei_entities(
     )
     resolved = resolve_huawei_entities(hass)
 
+    # Identify real connected-storage devices from the aggregate battery entities.
+    # Huawei also exposes per-module template sensors with the same translation keys;
+    # those are deliberately excluded because they are disabled by default and would
+    # double-count the already aggregated connected-energy-storage sensors.
+    battery_entities = [
+        entity
+        for entity_key in BATTERY_ENTITY_KEYS
+        for entity in resolved[entity_key]
+        if entity.device_id is not None and entity.device_type == "battery"
+    ]
+    battery_device_ids = sorted({
+        entity.device_id for entity in battery_entities
+        if entity.device_id is not None
+    })
+    battery_owner_ids = sorted({
+        source.owner_device_id
+        for entity in battery_entities
+        for source in _to_entity_sources("battery_state_of_capacity", [entity])
+        if source.owner_device_id is not None
+    })
+
     active_soc = [
         entity
         for entity in resolved["battery_state_of_capacity"]
-        if entity.disabled_by is None and entity.device_id is not None
+        if entity.disabled_by is None
+        and entity.device_id is not None
+        and entity.device_type == "battery"
     ]
     disabled_soc = [
         entity
         for entity in resolved["battery_state_of_capacity"]
-        if entity.disabled_by is not None and entity.device_id is not None
+        if entity.disabled_by is not None
+        and entity.device_id is not None
+        and entity.device_type == "battery"
     ]
 
     soc_index = _matches_by_key(active_soc, key="battery_state_of_capacity")
-    battery_device_ids = sorted(soc_index)
-    battery_owner_ids = sorted({
-        _to_entity_sources("battery_state_of_capacity", [entity])[0].owner_device_id
-        for entity in active_soc
-        if _to_entity_sources("battery_state_of_capacity", [entity])[0].owner_device_id
-        is not None
-    })
+    disabled_soc_index = _matches_by_key(
+        disabled_soc, key="battery_state_of_capacity"
+    )
+    duplicate_soc = [
+        entity
+        for values in soc_index.values()
+        if len(values) > 1
+        for entity in values
+    ]
+    disabled_soc_ids = [
+        device_id
+        for device_id in battery_device_ids
+        if disabled_soc_index.get(device_id)
+    ]
+    missing_soc_ids = [
+        device_id
+        for device_id in battery_device_ids
+        if not soc_index.get(device_id) and not disabled_soc_index.get(device_id)
+    ]
 
-    # Each physical battery must provide exactly one active SOC source.
-    if not battery_device_ids:
-        disabled_ids = [entity.entity_id for entity in disabled_soc]
-        sem_registry.set_entity_result(
-            HUAWEI_SYSTEM_ID,
-            "battery_state_of_capacity",
-            status="disabled" if disabled_soc else "missing",
-            platform=HUAWEI_DOMAIN,
-            matches=disabled_ids,
-            sources=_to_entity_sources("battery_state_of_capacity", disabled_soc),
+    if duplicate_soc:
+        soc_status = "ambiguous"
+        soc_sources = duplicate_soc
+    elif disabled_soc_ids:
+        soc_status = "disabled"
+        soc_sources = active_soc + disabled_soc
+        _LOGGER.error(
+            "Huawei resolver: Battery SOC is disabled for battery device IDs: %s",
+            disabled_soc_ids,
         )
-        _LOGGER.error("Huawei resolver: No active battery SOC entities found")
-    elif any(len(values) != 1 for values in soc_index.values()):
-        duplicate_matches = [
-            entity
-            for values in soc_index.values()
-            if len(values) > 1
-            for entity in values
-        ]
-        sem_registry.set_entity_result(
-            HUAWEI_SYSTEM_ID,
-            "battery_state_of_capacity",
-            status="ambiguous",
-            platform=HUAWEI_DOMAIN,
-            matches=[entity.entity_id for entity in duplicate_matches],
-            sources=_to_entity_sources(
-                "battery_state_of_capacity", duplicate_matches
-            ),
+    elif missing_soc_ids or not battery_device_ids:
+        soc_status = "missing"
+        soc_sources = active_soc
+        _LOGGER.error(
+            "Huawei resolver: Battery SOC is missing for battery device IDs: %s",
+            missing_soc_ids or "no battery devices identified",
         )
     else:
-        sem_registry.set_entity_result(
-            HUAWEI_SYSTEM_ID,
-            "battery_state_of_capacity",
-            status="found",
-            platform=HUAWEI_DOMAIN,
-            matches=[entity.entity_id for entity in active_soc],
-            sources=_to_entity_sources("battery_state_of_capacity", active_soc),
-        )
+        soc_status = "found"
+        soc_sources = active_soc
+
+    sem_registry.set_entity_result(
+        HUAWEI_SYSTEM_ID,
+        "battery_state_of_capacity",
+        status=soc_status,
+        platform=HUAWEI_DOMAIN,
+        matches=[entity.entity_id for entity in soc_sources],
+        sources=_to_entity_sources(
+            "battery_state_of_capacity", soc_sources
+        ),
+    )
 
     # Battery capacities must map one-to-one to the same physical battery devices.
     capacity_active = [
