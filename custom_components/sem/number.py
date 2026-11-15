@@ -1,5 +1,7 @@
 """SEM number entities mirrored to all physical Huawei devices."""
 
+import asyncio
+
 from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.exceptions import HomeAssistantError
 
@@ -98,7 +100,43 @@ class SemSystemNumber(SemEntityProxyMixin, NumberEntity):
                     f"Value {value} is not supported by source {entity_id}"
                 )
 
-        await self.async_call_sources("set_value", {"value": value})
+        results = await asyncio.gather(
+            *(
+                self.hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": entity_id, "value": value},
+                    blocking=True,
+                )
+                for entity_id in self._source_entity_ids
+            ),
+            return_exceptions=True,
+        )
+        failures = [
+            f"{entity_id}: {result}"
+            for entity_id, result in zip(self._source_entity_ids, results)
+            if isinstance(result, Exception)
+        ]
+        if failures:
+            raise HomeAssistantError(
+                "The number could not be applied to every battery: "
+                + "; ".join(failures)
+            )
+
+    @property
+    def available(self) -> bool:
+        """Require valid common limits for every physical number entity."""
+        states = self.source_states
+        attributes = [
+            state.attributes for state in states if state is not None
+        ]
+        return (
+            super().available
+            and len(attributes) == len(states)
+            and bool(self._manager.get_number_metadata(
+                self._entity_key, attributes
+            ))
+        )
 
     @property
     def extra_state_attributes(self) -> dict:
