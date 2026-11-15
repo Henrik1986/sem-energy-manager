@@ -25,12 +25,58 @@ class HuaweiEntityDefinition:
     translation_key: str
 
 
-# SEM's required Huawei entities. Add mappings only after their
-# translation keys have been verified against the Huawei integration.
+# Huawei entities required by SEM's current YAML logic and dashboard.
 HUAWEI_ENTITY_MAP: Final[dict[str, HuaweiEntityDefinition]] = {
+    # Battery
     "battery_working_mode": HuaweiEntityDefinition(
         domain="select",
         translation_key="storage_working_mode_settings",
+    ),
+    "battery_state_of_capacity": HuaweiEntityDefinition(
+        domain="sensor",
+        translation_key="storage_state_of_capacity",
+    ),
+    "battery_charge_discharge_power": HuaweiEntityDefinition(
+        domain="sensor",
+        translation_key="storage_charge_discharge_power",
+    ),
+    "battery_day_charge": HuaweiEntityDefinition(
+        domain="sensor",
+        translation_key="storage_current_day_charge_capacity",
+    ),
+    "battery_day_discharge": HuaweiEntityDefinition(
+        domain="sensor",
+        translation_key="storage_current_day_discharge_capacity",
+    ),
+
+    # Inverter
+    "inverter_input_power": HuaweiEntityDefinition(
+        domain="sensor",
+        translation_key="input_power",
+    ),
+    "inverter_active_power": HuaweiEntityDefinition(
+        domain="sensor",
+        translation_key="inverter_active_power",
+    ),
+
+    # Power meter
+    "power_meter_active_power": HuaweiEntityDefinition(
+        domain="sensor",
+        translation_key="power_meter_active_power",
+    ),
+
+    # Battery configuration
+    "grid_charge_maximum_power": HuaweiEntityDefinition(
+        domain="number",
+        translation_key="storage_power_of_charge_from_grid",
+    ),
+    "maximum_discharging_power": HuaweiEntityDefinition(
+        domain="number",
+        translation_key="storage_maximum_discharging_power",
+    ),
+    "end_of_discharge_soc": HuaweiEntityDefinition(
+        domain="number",
+        translation_key="storage_discharging_cutoff_capacity",
     ),
 }
 
