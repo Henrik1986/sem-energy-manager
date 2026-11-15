@@ -68,17 +68,23 @@ class SemHuaweiProxyMixin:
         )
         self.async_on_remove(self._remove_source_listener)
         self._refresh_source_listener()
+        self._update_from_source()
 
     @callback
     def _handle_registry_update(self) -> None:
         """Refresh the source entity when the registry changes."""
         self._refresh_source_listener()
+        self._update_from_source()
         self.async_write_ha_state()
 
     @callback
     def _handle_source_state_change(self, event) -> None:
         """Update the proxy when its source entity changes."""
+        self._update_from_source()
         self.async_write_ha_state()
+
+    def _update_from_source(self) -> None:
+        """Update platform-specific values from the current source."""
 
     @callback
     def _refresh_source_listener(self) -> None:
