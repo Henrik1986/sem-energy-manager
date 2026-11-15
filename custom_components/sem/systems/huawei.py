@@ -1,16 +1,30 @@
-"""Huawei Solar entity adapter."""
+"""Huawei Solar adapter with multi-inverter and multi-battery aggregation."""
+
+from __future__ import annotations
 
 import asyncio
 import logging
+import math
+from collections import defaultdict
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
 
 from .adapter import SemSystemAdapter
 from .entity_resolver import EntityRegistryMatch, find_registry_entities
+from .huawei_aggregation import (
+    capacity_weighted_soc,
+    common_numeric_value,
+    common_sem_options,
+    common_number_metadata,
+    parse_numeric,
+    sum_numeric_values,
+    value_fits_number_metadata,
+)
 from .registry import EntitySource, SemEntityRegistry
 
 _LOGGER = logging.getLogger(__name__)
@@ -82,6 +96,21 @@ HUAWEI_ENTITY_MAP: Final[dict[str, HuaweiEntityDefinition]] = {
     ),
 }
 
+BATTERY_ENTITY_KEYS: Final[frozenset[str]] = frozenset({
+    "battery_working_mode",
+    "battery_state_of_capacity",
+    "battery_rated_capacity",
+    "battery_charge_discharge_power",
+    "battery_day_charge",
+    "battery_day_discharge",
+})
+
+BATTERY_SETTING_KEYS: Final[frozenset[str]] = frozenset({
+    "grid_charge_maximum_power",
+    "maximum_discharging_power",
+    "end_of_discharge_soc",
+})
+
 
 def _to_entity_sources(
     entity_key: str,
@@ -115,16 +144,26 @@ def _to_entity_sources(
 def resolve_huawei_entities(
     hass: HomeAssistant,
 ) -> dict[str, list[EntityRegistryMatch]]:
-    """Resolve all configured Huawei entities from the entity registry."""
-    resolved: dict[str, list[EntityRegistryMatch]] = {}
+    """Resolve Huawei entities belonging to currently loaded config entries."""
+    loaded_entry_ids = {
+        entry.entry_id
+        for entry in hass.config_entries.async_entries(HUAWEI_DOMAIN)
+        if entry.disabled_by is None and entry.state is ConfigEntryState.LOADED
+    }
 
+    resolved: dict[str, list[EntityRegistryMatch]] = {}
     for function, definition in HUAWEI_ENTITY_MAP.items():
-        resolved[function] = find_registry_entities(
+        matches = find_registry_entities(
             hass,
             platform=HUAWEI_DOMAIN,
             domain=definition.domain,
             translation_key=definition.translation_key,
         )
+        resolved[function] = [
+            entity
+            for entity in matches
+            if entity.config_entry_id in loaded_entry_ids
+        ]
 
     return resolved
 
@@ -150,9 +189,7 @@ def get_huawei_inverter_groups(
             HUAWEI_SYSTEM_ID,
             entity_key,
         ):
-            inverter_device_id = (
-                source.owner_device_id or source.device_id
-            )
+            inverter_device_id = source.owner_device_id or source.device_id
             if inverter_device_id is None:
                 continue
 
@@ -168,214 +205,348 @@ def get_huawei_inverter_groups(
 
             if source.config_entry_id is not None:
                 group.config_entry_ids.add(source.config_entry_id)
-
             group.entities.setdefault(entity_key, []).append(source)
 
     return dict(sorted(groups.items()))
+
+
+def _matches_by_key(
+    matches: Sequence[EntityRegistryMatch],
+    *,
+    key: str,
+) -> dict[str, list[EntityRegistryMatch]]:
+    """Index matches by the physical device or owning inverter."""
+    indexed: dict[str, list[EntityRegistryMatch]] = defaultdict(list)
+    for match in matches:
+        source = _to_entity_sources(key, [match])[0]
+        index_key = (
+            match.device_id
+            if key in BATTERY_ENTITY_KEYS
+            else source.owner_device_id
+        )
+        if index_key is not None:
+            indexed[index_key].append(match)
+    return indexed
+
+
+def _store_expected_sources(
+    sem_registry: SemEntityRegistry,
+    *,
+    entity_key: str,
+    active: Sequence[EntityRegistryMatch],
+    disabled: Sequence[EntityRegistryMatch],
+    expected_ids: Sequence[str],
+    index_by: str,
+) -> None:
+    """Store one source for every expected physical device."""
+    active_index = _matches_by_key(active, key=entity_key)
+    disabled_index = _matches_by_key(disabled, key=entity_key)
+    expected = list(dict.fromkeys(expected_ids))
+
+    duplicates = {
+        device_id: values
+        for device_id, values in active_index.items()
+        if device_id in expected and len(values) > 1
+    }
+    if duplicates:
+        all_matches = [
+            match
+            for matches in duplicates.values()
+            for match in matches
+        ]
+        sem_registry.set_entity_result(
+            HUAWEI_SYSTEM_ID,
+            entity_key,
+            status="ambiguous",
+            platform=HUAWEI_DOMAIN,
+            matches=[match.entity_id for match in all_matches],
+            sources=_to_entity_sources(entity_key, all_matches),
+        )
+        return
+
+    selected = [
+        active_index[device_id][0]
+        for device_id in expected
+        if len(active_index.get(device_id, [])) == 1
+    ]
+    missing = [
+        device_id
+        for device_id in expected
+        if not active_index.get(device_id)
+    ]
+    disabled_matches = [
+        match
+        for device_id in missing
+        for match in disabled_index.get(device_id, [])
+    ]
+
+    if disabled_matches:
+        status = "disabled"
+        result_sources = disabled_matches
+    elif missing or not expected:
+        status = "missing"
+        result_sources = selected
+    else:
+        status = "found"
+        result_sources = selected
+
+    sem_registry.set_entity_result(
+        HUAWEI_SYSTEM_ID,
+        entity_key,
+        status=status,
+        platform=HUAWEI_DOMAIN,
+        matches=[match.entity_id for match in result_sources],
+        sources=_to_entity_sources(entity_key, result_sources),
+    )
+
+    if status == "found":
+        _LOGGER.info(
+            "Huawei resolver: %s mapped to %s physical sources",
+            entity_key,
+            len(result_sources),
+        )
+    elif status == "disabled":
+        _LOGGER.error(
+            "Huawei resolver: %s is disabled for device IDs %s",
+            entity_key,
+            missing,
+        )
+    else:
+        _LOGGER.error(
+            "Huawei resolver: %s is missing for device IDs %s",
+            entity_key,
+            missing or "no expected device IDs",
+        )
 
 
 def register_huawei_entities(
     hass: HomeAssistant,
     sem_registry: SemEntityRegistry,
 ) -> None:
-    """Resolve Huawei entities and store the results in the SEM registry."""
+    """Resolve all Huawei devices and register complete source collections."""
     sem_registry.register_system(
         HUAWEI_SYSTEM_ID,
         configured=True,
         required_entities=list(HUAWEI_ENTITY_MAP),
     )
-
     resolved = resolve_huawei_entities(hass)
 
-    for function, matches in resolved.items():
-        active = [entity for entity in matches if entity.disabled_by is None]
-        disabled = [entity for entity in matches if entity.disabled_by is not None]
+    active_soc = [
+        entity
+        for entity in resolved["battery_state_of_capacity"]
+        if entity.disabled_by is None and entity.device_id is not None
+    ]
+    disabled_soc = [
+        entity
+        for entity in resolved["battery_state_of_capacity"]
+        if entity.disabled_by is not None and entity.device_id is not None
+    ]
 
-        if function == "battery_rated_capacity":
-            battery_entities = resolved.get("battery_state_of_capacity", [])
-            battery_device_ids = {
-                entity.device_id
-                for entity in battery_entities
-                if entity.device_id is not None
-                and entity.disabled_by is None
-            }
+    soc_index = _matches_by_key(active_soc, key="battery_state_of_capacity")
+    battery_device_ids = sorted(soc_index)
+    battery_owner_ids = sorted({
+        _to_entity_sources("battery_state_of_capacity", [entity])[0].owner_device_id
+        for entity in active_soc
+        if _to_entity_sources("battery_state_of_capacity", [entity])[0].owner_device_id
+        is not None
+    })
 
-            active_by_device = {
-                entity.device_id: entity
-                for entity in active
-                if entity.device_id is not None
-            }
-            disabled_by_device = {
-                entity.device_id: entity
-                for entity in disabled
-                if entity.device_id is not None
-            }
+    # Each physical battery must provide exactly one active SOC source.
+    if not battery_device_ids:
+        disabled_ids = [entity.entity_id for entity in disabled_soc]
+        sem_registry.set_entity_result(
+            HUAWEI_SYSTEM_ID,
+            "battery_state_of_capacity",
+            status="disabled" if disabled_soc else "missing",
+            platform=HUAWEI_DOMAIN,
+            matches=disabled_ids,
+            sources=_to_entity_sources("battery_state_of_capacity", disabled_soc),
+        )
+        _LOGGER.error("Huawei resolver: No active battery SOC entities found")
+    elif any(len(values) != 1 for values in soc_index.values()):
+        duplicate_matches = [
+            entity
+            for values in soc_index.values()
+            if len(values) > 1
+            for entity in values
+        ]
+        sem_registry.set_entity_result(
+            HUAWEI_SYSTEM_ID,
+            "battery_state_of_capacity",
+            status="ambiguous",
+            platform=HUAWEI_DOMAIN,
+            matches=[entity.entity_id for entity in duplicate_matches],
+            sources=_to_entity_sources(
+                "battery_state_of_capacity", duplicate_matches
+            ),
+        )
+    else:
+        sem_registry.set_entity_result(
+            HUAWEI_SYSTEM_ID,
+            "battery_state_of_capacity",
+            status="found",
+            platform=HUAWEI_DOMAIN,
+            matches=[entity.entity_id for entity in active_soc],
+            sources=_to_entity_sources("battery_state_of_capacity", active_soc),
+        )
 
-            disabled_batteries = sorted(
-                device_id
-                for device_id in battery_device_ids
-                if device_id in disabled_by_device
-            )
-            missing_batteries = sorted(
-                device_id
-                for device_id in battery_device_ids
-                if device_id not in active_by_device
-            )
+    # Battery capacities must map one-to-one to the same physical battery devices.
+    capacity_active = [
+        entity
+        for entity in resolved["battery_rated_capacity"]
+        if entity.disabled_by is None
+    ]
+    capacity_disabled = [
+        entity
+        for entity in resolved["battery_rated_capacity"]
+        if entity.disabled_by is not None
+    ]
+    _store_expected_sources(
+        sem_registry,
+        entity_key="battery_rated_capacity",
+        active=capacity_active,
+        disabled=capacity_disabled,
+        expected_ids=battery_device_ids,
+        index_by="device_id",
+    )
 
-            if disabled_batteries:
-                disabled_ids = [
-                    disabled_by_device[device_id].entity_id
-                    for device_id in disabled_batteries
-                ]
-                sem_registry.set_entity_result(
-                    HUAWEI_SYSTEM_ID,
-                    function,
-                    status="disabled",
-                    platform=HUAWEI_DOMAIN,
-                    matches=disabled_ids,
-                    sources=_to_entity_sources(
-                        function,
-                        [
-                            disabled_by_device[device_id]
-                            for device_id in disabled_batteries
-                        ],
-                    ),
-                )
-                _LOGGER.error(
-                    "Huawei resolver: Rated Capacity is disabled for battery device IDs: %s. "
-                    "Enable the Rated Capacity sensor for every battery system.",
-                    disabled_batteries,
-                )
-            elif missing_batteries or not battery_device_ids:
-                missing_ids = [
-                    active_by_device[device_id].entity_id
-                    for device_id in battery_device_ids
-                    if device_id in active_by_device
-                ]
-                sem_registry.set_entity_result(
-                    HUAWEI_SYSTEM_ID,
-                    function,
-                    status="missing",
-                    platform=HUAWEI_DOMAIN,
-                    matches=missing_ids,
-                    sources=_to_entity_sources(
-                        function,
-                        [
-                            active_by_device[device_id]
-                            for device_id in sorted(active_by_device)
-                            if device_id in battery_device_ids
-                        ],
-                    ),
-                )
-                _LOGGER.error(
-                    "Huawei resolver: Rated Capacity is missing for battery device IDs: %s.",
-                    missing_batteries or "no battery devices identified",
-                )
-            else:
-                capacity_matches = [
-                    active_by_device[device_id]
-                    for device_id in sorted(battery_device_ids)
-                ]
-                active_ids = [
-                    entity.entity_id for entity in capacity_matches
-                ]
-                first = capacity_matches[0]
-                sem_registry.set_entity_result(
-                    HUAWEI_SYSTEM_ID,
-                    function,
-                    status="found",
-                    entity_id=first.entity_id,
-                    unique_id=first.unique_id,
-                    platform=HUAWEI_DOMAIN,
-                    device_id=first.device_id,
-                    config_entry_id=first.config_entry_id,
-                    matches=active_ids,
-                    sources=_to_entity_sources(function, capacity_matches),
-                )
-                _LOGGER.info(
-                    "Huawei resolver: Rated Capacity is enabled for all %s battery systems: %s",
-                    len(battery_device_ids),
-                    active_ids,
-                )
+    for entity_key in (
+        "battery_working_mode",
+        "battery_charge_discharge_power",
+        "battery_day_charge",
+        "battery_day_discharge",
+    ):
+        _store_expected_sources(
+            sem_registry,
+            entity_key=entity_key,
+            active=[
+                entity for entity in resolved[entity_key]
+                if entity.disabled_by is None
+            ],
+            disabled=[
+                entity for entity in resolved[entity_key]
+                if entity.disabled_by is not None
+            ],
+            expected_ids=battery_device_ids,
+            index_by="device_id",
+        )
 
-            continue
+    # One inverter input-power entity is required for every inverter which has
+    # a battery. Extra active inverter sources are also retained (for PV-only units).
+    input_active = [
+        entity
+        for entity in resolved["inverter_input_power"]
+        if entity.disabled_by is None
+    ]
+    input_disabled = [
+        entity
+        for entity in resolved["inverter_input_power"]
+        if entity.disabled_by is not None
+    ]
+    input_index = _matches_by_key(input_active, key="inverter_input_power")
+    duplicate_input = [
+        entity
+        for values in input_index.values()
+        if len(values) > 1
+        for entity in values
+    ]
+    missing_input_owners = [
+        owner_id for owner_id in battery_owner_ids if owner_id not in input_index
+    ]
+    if duplicate_input:
+        sem_registry.set_entity_result(
+            HUAWEI_SYSTEM_ID,
+            "inverter_input_power",
+            status="ambiguous",
+            platform=HUAWEI_DOMAIN,
+            matches=[entity.entity_id for entity in duplicate_input],
+            sources=_to_entity_sources("inverter_input_power", duplicate_input),
+        )
+    elif missing_input_owners:
+        disabled_index = _matches_by_key(
+            input_disabled, key="inverter_input_power"
+        )
+        disabled_matches = [
+            entity
+            for owner_id in missing_input_owners
+            for entity in disabled_index.get(owner_id, [])
+        ]
+        sem_registry.set_entity_result(
+            HUAWEI_SYSTEM_ID,
+            "inverter_input_power",
+            status="disabled" if disabled_matches else "missing",
+            platform=HUAWEI_DOMAIN,
+            matches=[entity.entity_id for entity in disabled_matches],
+            sources=_to_entity_sources(
+                "inverter_input_power", disabled_matches
+            ),
+        )
+    elif not input_active:
+        sem_registry.set_entity_result(
+            HUAWEI_SYSTEM_ID,
+            "inverter_input_power",
+            status="disabled" if input_disabled else "missing",
+            platform=HUAWEI_DOMAIN,
+            matches=[entity.entity_id for entity in input_disabled],
+            sources=_to_entity_sources("inverter_input_power", input_disabled),
+        )
+    else:
+        sem_registry.set_entity_result(
+            HUAWEI_SYSTEM_ID,
+            "inverter_input_power",
+            status="found",
+            platform=HUAWEI_DOMAIN,
+            matches=[entity.entity_id for entity in input_active],
+            sources=_to_entity_sources("inverter_input_power", input_active),
+        )
 
-        if len(active) == 1:
-            entity = active[0]
-            state = hass.states.get(entity.entity_id)
-            state_value = state.state if state is not None else "not_loaded"
+    # Battery settings belong to an inverter or its connected battery child.
+    for entity_key in BATTERY_SETTING_KEYS:
+        _store_expected_sources(
+            sem_registry,
+            entity_key=entity_key,
+            active=[
+                entity for entity in resolved[entity_key]
+                if entity.disabled_by is None
+            ],
+            disabled=[
+                entity for entity in resolved[entity_key]
+                if entity.disabled_by is not None
+            ],
+            expected_ids=battery_owner_ids,
+            index_by="owner_device_id",
+        )
 
-            sem_registry.set_entity_result(
-                HUAWEI_SYSTEM_ID,
-                function,
-                status="found",
-                entity_id=entity.entity_id,
-                unique_id=entity.unique_id,
-                platform=HUAWEI_DOMAIN,
-                device_id=entity.device_id,
-                config_entry_id=entity.config_entry_id,
-                matches=[entity.entity_id],
-                sources=_to_entity_sources(function, active),
-            )
+    # The grid meter is plant-wide, not additive. Keep all candidates so the
+    # adapter can detect duplicate or conflicting readings rather than summing them.
+    meter_active = [
+        entity
+        for entity in resolved["power_meter_active_power"]
+        if entity.disabled_by is None
+    ]
+    meter_disabled = [
+        entity
+        for entity in resolved["power_meter_active_power"]
+        if entity.disabled_by is not None
+    ]
+    meter_status = "found" if meter_active else (
+        "disabled" if meter_disabled else "missing"
+    )
+    meter_sources = meter_active if meter_active else meter_disabled
+    sem_registry.set_entity_result(
+        HUAWEI_SYSTEM_ID,
+        "power_meter_active_power",
+        status=meter_status,
+        platform=HUAWEI_DOMAIN,
+        matches=[entity.entity_id for entity in meter_sources],
+        sources=_to_entity_sources("power_meter_active_power", meter_sources),
+    )
 
-            _LOGGER.info(
-                "Huawei resolver: %s found. Entity ID: %s | Unique ID: %s | State: %s",
-                function,
-                entity.entity_id,
-                entity.unique_id,
-                state_value,
-            )
-
-        elif len(active) > 1:
-            match_ids = [entity.entity_id for entity in active]
-
-            sem_registry.set_entity_result(
-                HUAWEI_SYSTEM_ID,
-                function,
-                status="ambiguous",
-                platform=HUAWEI_DOMAIN,
-                matches=match_ids,
-                sources=_to_entity_sources(function, active),
-            )
-
-            _LOGGER.error(
-                "Huawei resolver: Multiple matches for %s: %s. "
-                "All physical sources have been recorded, but aggregation "
-                "is not enabled yet.",
-                function,
-                match_ids,
-            )
-
-        elif disabled:
-            match_ids = [entity.entity_id for entity in disabled]
-
-            sem_registry.set_entity_result(
-                HUAWEI_SYSTEM_ID,
-                function,
-                status="disabled",
-                platform=HUAWEI_DOMAIN,
-                matches=match_ids,
-                sources=_to_entity_sources(function, disabled),
-            )
-
-            _LOGGER.warning(
-                "Huawei resolver: Matching entity for %s is disabled: %s",
-                function,
-                match_ids,
-            )
-
-        else:
-            sem_registry.set_entity_result(
-                HUAWEI_SYSTEM_ID,
-                function,
-                status="missing",
-                platform=HUAWEI_DOMAIN,
-            )
-
-            _LOGGER.warning(
-                "Huawei resolver: No entity found for %s",
-                function,
-            )
+    _LOGGER.info(
+        "Huawei resolver: registered %s battery devices across %s inverter owners",
+        len(battery_device_ids),
+        len(battery_owner_ids),
+    )
 
 
 def mark_huawei_entities_missing(
@@ -387,7 +558,6 @@ def mark_huawei_entities_missing(
         configured=True,
         required_entities=list(HUAWEI_ENTITY_MAP),
     )
-
     for function in HUAWEI_ENTITY_MAP:
         sem_registry.set_entity_result(
             HUAWEI_SYSTEM_ID,
@@ -401,84 +571,54 @@ async def async_wait_for_huawei(
     hass: HomeAssistant,
     sem_registry: SemEntityRegistry,
 ) -> None:
-    """Wait until Huawei Solar has completed its setup."""
-
+    """Wait until all enabled Huawei Solar entries finish setting up."""
     terminal_states = {
         ConfigEntryState.LOADED,
         ConfigEntryState.SETUP_ERROR,
         ConfigEntryState.MIGRATION_ERROR,
         ConfigEntryState.FAILED_UNLOAD,
     }
-
     required_entities = list(HUAWEI_ENTITY_MAP)
-    entries = [
-        entry
-        for entry in hass.config_entries.async_entries(HUAWEI_DOMAIN)
-        if entry.disabled_by is None
-    ]
-
-    if not entries:
-        sem_registry.register_system(
-            HUAWEI_SYSTEM_ID,
-            configured=False,
-            required_entities=required_entities,
-        )
-        _LOGGER.warning(
-            "Huawei resolver: No enabled Huawei Solar config entry found"
-        )
-        return
-
-    sem_registry.register_system(
-        HUAWEI_SYSTEM_ID,
-        configured=True,
-        required_entities=required_entities,
-    )
-
-    _LOGGER.info(
-        "Huawei resolver: Waiting for Huawei Solar to finish starting"
-    )
 
     for _ in range(120):
         if hass.is_stopping:
             return
-
         entries = [
             entry
             for entry in hass.config_entries.async_entries(HUAWEI_DOMAIN)
             if entry.disabled_by is None
         ]
-
         if not entries:
             sem_registry.register_system(
                 HUAWEI_SYSTEM_ID,
                 configured=False,
                 required_entities=required_entities,
             )
-            _LOGGER.warning(
-                "Huawei resolver: No enabled Huawei Solar config entry found"
-            )
+            _LOGGER.warning("Huawei resolver: No enabled Huawei Solar config entry found")
             return
 
         if all(entry.state in terminal_states for entry in entries):
-            if any(entry.state is ConfigEntryState.LOADED for entry in entries):
+            loaded = [
+                entry for entry in entries
+                if entry.state is ConfigEntryState.LOADED
+            ]
+            if loaded:
                 register_huawei_entities(hass, sem_registry)
             else:
                 mark_huawei_entities_missing(sem_registry)
                 _LOGGER.error(
-                    "Huawei resolver: Huawei Solar failed to load. States: %s",
+                    "Huawei resolver: No Huawei Solar config entry loaded: %s",
                     [(entry.title, entry.state.value) for entry in entries],
                 )
             return
 
         await asyncio.sleep(5)
 
-    _LOGGER.warning(
-        "Huawei resolver: Timed out waiting for Huawei Solar (10 minutes)"
-    )
+    _LOGGER.warning("Huawei resolver: Timed out waiting for Huawei Solar (10 minutes)")
 
 
 class HuaweiSolarAdapter(SemSystemAdapter):
-    """Adapter for the Huawei Solar integration."""
+    """Adapter for a Huawei plant containing one or more inverters and batteries."""
 
     system_id = HUAWEI_SYSTEM_ID
     integration_domain = HUAWEI_DOMAIN
@@ -491,41 +631,175 @@ class HuaweiSolarAdapter(SemSystemAdapter):
         "adaptive": "adaptive",
     }
 
+    def __init__(self) -> None:
+        self._hass: HomeAssistant | None = None
+        self._registry: SemEntityRegistry | None = None
+
     async def async_setup(
         self,
         hass: HomeAssistant,
         registry: SemEntityRegistry,
     ) -> None:
-        """Wait for Huawei Solar and resolve its required entities."""
+        """Wait for Huawei Solar and resolve every loaded config entry."""
+        self._hass = hass
+        self._registry = registry
         await async_wait_for_huawei(hass, registry)
+
+    def _sources(self, entity_key: str) -> list[EntitySource]:
+        if self._registry is None:
+            return []
+        return self._registry.get_entity_sources(HUAWEI_SYSTEM_ID, entity_key)
+
+    def _states_by_device(
+        self,
+        entity_key: str,
+    ) -> dict[str, State | None]:
+        """Return source states indexed by their physical device IDs."""
+        if self._hass is None:
+            return {}
+        return {
+            source.device_id: self._hass.states.get(source.entity_id)
+            for source in self._sources(entity_key)
+            if source.device_id is not None
+        }
+
+    def _battery_device_ids(self) -> set[str]:
+        return {
+            source.device_id
+            for source in self._sources("battery_state_of_capacity")
+            if source.device_id is not None
+        }
+
+    def _get_state_values(
+        self,
+        entity_key: str,
+        source_states: Sequence[State | None],
+    ) -> list[Any]:
+        return [
+            state.state if state is not None else None
+            for state in source_states
+        ]
+
+    def get_sensor_value(
+        self,
+        entity_key: str,
+        source_states: Sequence[State | None],
+    ) -> float | str | None:
+        """Aggregate physical sensor values into one plant-level value."""
+        if not source_states or any(
+            state is None or state.state in ("unknown", "unavailable")
+            for state in source_states
+        ):
+            return None
+
+        if entity_key == "battery_state_of_capacity":
+            soc_sources = self._sources("battery_state_of_capacity")
+            cap_sources = self._sources("battery_rated_capacity")
+            if len(soc_sources) != len(source_states):
+                return None
+            soc_by_device = {
+                source.device_id: state.state
+                for source, state in zip(soc_sources, source_states)
+                if source.device_id is not None and state is not None
+            }
+            if len(soc_by_device) != len(soc_sources):
+                return None
+            if self._hass is None:
+                return None
+            capacity_by_device = {
+                source.device_id: (
+                    self._hass.states.get(source.entity_id).state
+                    if self._hass.states.get(source.entity_id) is not None
+                    else None
+                )
+                for source in cap_sources
+                if source.device_id is not None
+            }
+            return capacity_weighted_soc(soc_by_device, capacity_by_device)
+
+        if entity_key in {
+            "battery_charge_discharge_power",
+            "battery_day_charge",
+            "battery_day_discharge",
+        }:
+            sources = self._sources(entity_key)
+            if len(sources) != len(source_states):
+                return None
+            device_ids = {
+                source.device_id
+                for source in sources
+                if source.device_id is not None
+            }
+            if device_ids != self._battery_device_ids():
+                return None
+            return sum_numeric_values(self._get_state_values(entity_key, source_states))
+
+        if entity_key == "inverter_input_power":
+            return sum_numeric_values(self._get_state_values(entity_key, source_states))
+
+        if entity_key == "power_meter_active_power":
+            values = [
+                parse_numeric(value)
+                for value in self._get_state_values(entity_key, source_states)
+            ]
+            if not values or any(value is None for value in values):
+                return None
+            valid = [value for value in values if value is not None]
+            if len(valid) == 1:
+                return valid[0]
+            tolerance = max(100.0, max(abs(value) for value in valid) * 0.02)
+            if max(valid) - min(valid) > tolerance:
+                return None
+            # Duplicate meter entities may describe the same plant meter.
+            # Average agreeing samples; never add them together.
+            return sum(valid) / len(valid)
+
+        return super().get_sensor_value(entity_key, source_states)
+
+    def get_sensor_metadata(
+        self,
+        entity_key: str,
+        source_attributes: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Expose metadata only when all physical sources use the same units."""
+        return super().get_sensor_metadata(entity_key, source_attributes)
+
+    def get_number_value(
+        self,
+        entity_key: str,
+        source_states: Sequence[State | None],
+    ) -> float | None:
+        """Expose a setting only if every physical device currently agrees."""
+        return super().get_number_value(entity_key, source_states)
+
+    def get_number_metadata(
+        self,
+        entity_key: str,
+        source_attributes: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Expose the intersection of all physical number ranges."""
+        return common_number_metadata(source_attributes) or {}
 
     def get_sem_options(
         self,
         entity_key: str,
-        source_options: list[str],
+        source_options: Sequence[Sequence[str]],
     ) -> list[str]:
-        """Expose standard SEM working modes instead of Huawei options."""
+        """Expose only common standard battery modes."""
         if entity_key != "battery_working_mode":
-            return source_options
+            return super().get_sem_options(entity_key, source_options)
+        return common_sem_options(source_options, self._WORKING_MODE_MAP)
 
-        return [
-            self._WORKING_MODE_MAP[option]
-            for option in source_options
-            if option in self._WORKING_MODE_MAP
-        ]
-
-    def to_source_option(
+    def to_source_options(
         self,
         entity_key: str,
         sem_option: str,
-        source_options: list[str],
-    ) -> str:
-        """Translate a standard SEM working mode into a Huawei option."""
+        source_options: Sequence[Sequence[str]],
+    ) -> list[str]:
+        """Translate one SEM battery mode and prevalidate every source."""
         if entity_key != "battery_working_mode":
-            return super().to_source_option(
-                entity_key,
-                sem_option,
-                source_options,
+            return super().to_source_options(
+                entity_key, sem_option, source_options
             )
 
         reverse_map = {
@@ -533,24 +807,124 @@ class HuaweiSolarAdapter(SemSystemAdapter):
             for source_value, sem_value in self._WORKING_MODE_MAP.items()
         }
         source_option = reverse_map.get(sem_option)
-
-        if source_option is None or source_option not in source_options:
+        if source_option is None or not source_options:
+            raise ValueError(f"Unsupported SEM battery working mode: {sem_option}")
+        if any(source_option not in options for options in source_options):
             raise ValueError(
-                f"Unsupported SEM battery working mode: {sem_option}"
+                f"Battery working mode {sem_option!r} is not supported by every battery"
             )
-
-        return source_option
+        return [source_option for _ in source_options]
 
     def to_sem_option(
         self,
         entity_key: str,
-        source_option: str,
+        source_options: Sequence[str | None],
     ) -> str | None:
-        """Translate a Huawei working mode into its SEM value."""
+        """Translate all Huawei modes and require a common value."""
         if entity_key != "battery_working_mode":
-            return source_option
+            return super().to_sem_option(entity_key, source_options)
 
-        return self._WORKING_MODE_MAP.get(source_option)
+        translated = [
+            self._WORKING_MODE_MAP.get(option) if option is not None else None
+            for option in source_options
+        ]
+        return super().to_sem_option(entity_key, translated)
+
+    def get_runtime_diagnostics(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+    ) -> dict[str, Any]:
+        """Report setting differences and duplicate meter disagreement."""
+        mismatches: list[dict[str, Any]] = []
+
+        mode_sources = registry.get_entity_sources(
+            HUAWEI_SYSTEM_ID, "battery_working_mode"
+        )
+        mode_values = []
+        for source in mode_sources:
+            state = hass.states.get(source.entity_id)
+            value = (
+                self._WORKING_MODE_MAP.get(state.state)
+                if state is not None else None
+            )
+            mode_values.append((source.entity_id, value))
+        unique_modes = {value for _, value in mode_values}
+        if len(unique_modes) > 1 or (mode_values and None in unique_modes):
+            mismatches.append({
+                "entity": "battery_working_mode",
+                "sources": [
+                    {"entity_id": entity_id, "value": value}
+                    for entity_id, value in mode_values
+                ],
+            })
+
+        for entity_key in BATTERY_SETTING_KEYS:
+            sources = registry.get_entity_sources(HUAWEI_SYSTEM_ID, entity_key)
+            values = []
+            for source in sources:
+                state = hass.states.get(source.entity_id)
+                values.append((
+                    source.entity_id,
+                    parse_numeric(state.state) if state is not None else None,
+                ))
+            unique_values = {value for _, value in values}
+            if len(unique_values) > 1 or (values and None in unique_values):
+                mismatches.append({
+                    "entity": entity_key,
+                    "sources": [
+                        {"entity_id": entity_id, "value": value}
+                        for entity_id, value in values
+                    ],
+                })
+
+        meter_sources = registry.get_entity_sources(
+            HUAWEI_SYSTEM_ID, "power_meter_active_power"
+        )
+        meter_values = []
+        for source in meter_sources:
+            state = hass.states.get(source.entity_id)
+            meter_values.append((
+                source.entity_id,
+                parse_numeric(state.state) if state is not None else None,
+            ))
+        valid_meter_values = [value for _, value in meter_values if value is not None]
+        if len(valid_meter_values) > 1:
+            tolerance = max(
+                100.0,
+                max(abs(value) for value in valid_meter_values) * 0.02,
+            )
+            if max(valid_meter_values) - min(valid_meter_values) > tolerance:
+                mismatches.append({
+                    "entity": "power_meter_active_power",
+                    "message": (
+                        "Several Huawei meter entities report conflicting plant values. "
+                        "The SEM meter sensor is unavailable to prevent double counting."
+                    ),
+                    "sources": [
+                        {"entity_id": entity_id, "value": value}
+                        for entity_id, value in meter_values
+                    ],
+                })
+
+        groups = get_huawei_inverter_groups(registry)
+        return {
+            "inverter_count": len(groups),
+            "battery_count": len(self._battery_device_ids()),
+            "inverters": [
+                {
+                    "device_id": group.inverter_device_id,
+                    "root_device_id": group.root_device_id,
+                    "config_entry_ids": sorted(group.config_entry_ids),
+                    "entities": {
+                        key: [source.entity_id for source in sources]
+                        for key, sources in group.entities.items()
+                    },
+                }
+                for group in groups.values()
+            ],
+            "setting_mismatches": mismatches,
+        }
 
     async def async_execute(
         self,
@@ -559,64 +933,69 @@ class HuaweiSolarAdapter(SemSystemAdapter):
         command: str,
         data: dict[str, Any],
     ) -> None:
-        """Execute a supported Huawei-specific operation for SEM."""
+        """Execute a Huawei command against every applicable physical device."""
         if command == "set_battery_time_of_use_periods":
             service = "set_tou_periods"
             device_key = "battery_working_mode"
             required = {"periods"}
-            service_data = {
-                "periods": data.get("periods"),
-            }
-
+            service_data = {"periods": data.get("periods")}
         elif command == "set_grid_export_power_limit":
             service = "set_maximum_feed_grid_power"
             device_key = "inverter_input_power"
             required = {"power"}
-            service_data = {
-                "power": data.get("power"),
-            }
-
+            service_data = {"power": data.get("power")}
         elif command == "reset_grid_export_power_limit":
             service = "reset_maximum_feed_grid_power"
             device_key = "inverter_input_power"
             required = set()
             service_data = {}
-
         else:
             raise HomeAssistantError(
                 f"Unsupported SEM command for Huawei: {command}"
             )
 
-        missing = [
-            key
-            for key in required
-            if key not in data
-        ]
+        missing = required - set(data)
         if missing:
             raise HomeAssistantError(
-                f"Missing data for SEM command {command}: {missing}"
+                f"Missing data for SEM command {command}: {sorted(missing)}"
             )
 
-        device_id = registry.get_entity_device_id(
-            HUAWEI_SYSTEM_ID,
-            device_key,
+        source_key = (
+            "battery_working_mode"
+            if command == "set_battery_time_of_use_periods"
+            else "inverter_input_power"
         )
-        if device_id is None:
+        device_ids = registry.get_entity_device_ids(
+            HUAWEI_SYSTEM_ID, source_key
+        )
+        if not device_ids:
             raise HomeAssistantError(
-                f"No Huawei device found for SEM command {command}"
+                f"No Huawei devices found for SEM command {command}"
             )
-
         if not hass.services.has_service(HUAWEI_DOMAIN, service):
             raise HomeAssistantError(
                 f"Huawei service is not available: {service}"
             )
 
-        await hass.services.async_call(
-            HUAWEI_DOMAIN,
-            service,
-            {
-                "device_id": device_id,
-                **service_data,
-            },
-            blocking=True,
+        async def call_device(device_id: str) -> None:
+            await hass.services.async_call(
+                HUAWEI_DOMAIN,
+                service,
+                {"device_id": device_id, **service_data},
+                blocking=True,
+            )
+
+        results = await asyncio.gather(
+            *(call_device(device_id) for device_id in device_ids),
+            return_exceptions=True,
         )
+        failures = [
+            f"{device_id}: {result}"
+            for device_id, result in zip(device_ids, results)
+            if isinstance(result, Exception)
+        ]
+        if failures:
+            raise HomeAssistantError(
+                f"Huawei command {command} failed for some devices: "
+                + "; ".join(failures)
+            )
