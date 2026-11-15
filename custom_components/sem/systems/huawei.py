@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import math
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
@@ -18,12 +17,10 @@ from .adapter import SemSystemAdapter
 from .entity_resolver import EntityRegistryMatch, find_registry_entities
 from .huawei_aggregation import (
     capacity_weighted_soc,
-    common_numeric_value,
     common_sem_options,
     common_number_metadata,
     parse_numeric,
     sum_numeric_values,
-    value_fits_number_metadata,
 )
 from .registry import EntitySource, SemEntityRegistry
 
@@ -716,6 +713,11 @@ class HuaweiSolarAdapter(SemSystemAdapter):
                 if source.device_id is not None
             }
             return capacity_weighted_soc(soc_by_device, capacity_by_device)
+
+        if entity_key == "battery_rated_capacity":
+            return sum_numeric_values(
+                self._get_state_values(entity_key, source_states)
+            )
 
         if entity_key in {
             "battery_charge_discharge_power",
