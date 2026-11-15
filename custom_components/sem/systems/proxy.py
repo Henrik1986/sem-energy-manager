@@ -19,7 +19,11 @@ SENSOR_ENTITY_DEFINITIONS = (
     ("battery_day_charge", "SEM Battery Day Charge", "mdi:battery-arrow-up"),
     ("battery_day_discharge", "SEM Battery Day Discharge", "mdi:battery-arrow-down"),
     ("inverter_input_power", "SEM Inverter Input Power", "mdi:solar-power"),
-    ("power_meter_active_power", "SEM Power Meter Active Power", "mdi:transmission-tower"),
+    (
+        "power_meter_active_power",
+        "SEM Power Meter Active Power",
+        "mdi:transmission-tower",
+    ),
 )
 
 SELECT_ENTITY_DEFINITIONS = (
