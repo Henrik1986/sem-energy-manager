@@ -167,13 +167,13 @@ class SemEntityRegistry:
         system_id: str,
         entity_key: str,
     ) -> list[EntitySource]:
-        """Return all physical source entities for a logical SEM entity."""
+        """Return discovered physical sources, including ambiguous matches."""
         system = self._systems.get(system_id)
         if system is None:
             return []
 
         result = system.entities.get(entity_key)
-        if result is None or result.status != "found":
+        if result is None:
             return []
 
         if result.sources:
@@ -197,7 +197,15 @@ class SemEntityRegistry:
         system_id: str,
         entity_key: str,
     ) -> list[str]:
-        """Return all source entity IDs for a logical SEM entity."""
+        """Return source IDs only after the logical entity is resolved."""
+        system = self._systems.get(system_id)
+        if system is None:
+            return []
+
+        result = system.entities.get(entity_key)
+        if result is None or result.status != "found":
+            return []
+
         return [
             source.entity_id
             for source in self.get_entity_sources(system_id, entity_key)
@@ -208,7 +216,15 @@ class SemEntityRegistry:
         system_id: str,
         entity_key: str,
     ) -> list[str]:
-        """Return unique device IDs for a logical SEM entity."""
+        """Return unique device IDs for a resolved logical SEM entity."""
+        system = self._systems.get(system_id)
+        if system is None:
+            return []
+
+        result = system.entities.get(entity_key)
+        if result is None or result.status != "found":
+            return []
+
         return list(dict.fromkeys(
             source.device_id
             for source in self.get_entity_sources(system_id, entity_key)
