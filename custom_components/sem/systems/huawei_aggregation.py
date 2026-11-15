@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
@@ -59,6 +60,21 @@ def capacity_weighted_soc(
     return weighted_sum / total_capacity
 
 
+def group_sources_by_inverter(
+    sources: Sequence[Any],
+) -> dict[str, list[Any]]:
+    """Group physical sources by their owning inverter, not by daisy-chain root."""
+    grouped: dict[str, list[Any]] = defaultdict(list)
+    for source in sources:
+        inverter_id = (
+            getattr(source, "owner_device_id", None)
+            or getattr(source, "device_id", None)
+        )
+        if inverter_id is not None:
+            grouped[inverter_id].append(source)
+    return dict(sorted(grouped.items()))
+
+
 def plant_meter_value(
     values: Sequence[Any],
     *,
@@ -111,15 +127,33 @@ def common_number_metadata(
     ):
         return None
 
-    minimum = max(value for value in mins if value is not None)
+    valid_mins = [value for value in mins if value is not None]
+    minimum = max(valid_mins)
     maximum = min(value for value in maxes if value is not None)
+    step = step_values[0]
+
+    # All devices must share the same step grid, not just the same step size.
+    base_minimum = min(valid_mins)
+    if not math.isclose(
+        (minimum - base_minimum) / step,
+        round((minimum - base_minimum) / step),
+        rel_tol=0,
+        abs_tol=1e-6,
+    ):
+        return None
+
     if minimum > maximum:
+        return None
+
+    # Round the displayed maximum down to a value every device can accept.
+    maximum = minimum + math.floor((maximum - minimum) / step) * step
+    if maximum < minimum:
         return None
 
     return {
         "min_value": minimum,
         "max_value": maximum,
-        "step": step_values[0],
+        "step": step,
         "unit_of_measurement": next(iter(units)),
         "mode": next(iter(modes)),
     }
