@@ -370,7 +370,7 @@ class HuaweiSolarAdapter(SemSystemAdapter):
         data: dict[str, Any],
     ) -> None:
         """Execute a supported Huawei-specific operation for SEM."""
-        if command == "set_tou_periods":
+        if command == "set_battery_time_of_use_periods":
             service = "set_tou_periods"
             device_key = "battery_working_mode"
             required = {"periods"}
@@ -378,7 +378,7 @@ class HuaweiSolarAdapter(SemSystemAdapter):
                 "periods": data.get("periods"),
             }
 
-        elif command == "set_maximum_feed_grid_power":
+        elif command == "set_grid_export_power_limit":
             service = "set_maximum_feed_grid_power"
             device_key = "inverter_input_power"
             required = {"power"}
@@ -386,7 +386,7 @@ class HuaweiSolarAdapter(SemSystemAdapter):
                 "power": data.get("power"),
             }
 
-        elif command == "reset_maximum_feed_grid_power":
+        elif command == "reset_grid_export_power_limit":
             service = "reset_maximum_feed_grid_power"
             device_key = "inverter_input_power"
             required = set()
