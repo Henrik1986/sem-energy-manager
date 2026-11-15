@@ -16,6 +16,7 @@ class EntityRegistryMatch:
     device_id: str | None
     parent_device_id: str | None
     root_device_id: str | None
+    device_type: str | None
     config_entry_id: str | None
     disabled_by: str | None
 
@@ -40,6 +41,26 @@ def _get_root_device_id(
         current_device_id = device.via_device_id
 
     return current_device_id or device_id
+
+
+def _get_device_type(device: dr.DeviceEntry | None) -> str | None:
+    """Identify Huawei child devices from their integration identifiers."""
+    if device is None:
+        return None
+
+    for domain, identifier in device.identifiers:
+        if domain != "huawei_solar":
+            continue
+        if identifier.endswith("/connected_energy_storage"):
+            return "battery"
+        if identifier.endswith("/power_meter"):
+            return "power_meter"
+        if identifier.endswith("/battery_1") or identifier.endswith("/battery_2"):
+            return "battery_module"
+        if "/" not in identifier:
+            return "inverter"
+
+    return None
 
 
 def find_registry_entities(
@@ -85,6 +106,7 @@ def find_registry_entities(
                 root_device_id=_get_root_device_id(
                     device_registry, entry.device_id
                 ),
+                device_type=_get_device_type(device),
                 config_entry_id=entry.config_entry_id,
                 disabled_by=disabled_by,
             )
