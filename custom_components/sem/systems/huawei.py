@@ -3,9 +3,10 @@
 import asyncio
 import logging
 from dataclasses import dataclass
-from typing import Final
+from typing import Any, Final
 
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import HomeAssistant
 
 from .entity_resolver import EntityRegistryMatch, find_registry_entities
