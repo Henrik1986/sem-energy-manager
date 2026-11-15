@@ -1,5 +1,7 @@
 """SEM select entities backed by all physical source devices."""
 
+import asyncio
+
 from homeassistant.components.select import SelectEntity
 from homeassistant.exceptions import HomeAssistantError
 
@@ -58,6 +60,11 @@ class SemSystemSelect(SemEntityProxyMixin, SelectEntity):
             source_values,
         )
 
+    @property
+    def available(self) -> bool:
+        """Require all source devices and a common selectable option."""
+        return super().available and bool(self._attr_options)
+
     async def async_select_option(self, option: str) -> None:
         """Validate and mirror a selected option to every battery."""
         if not self.available:
@@ -91,12 +98,29 @@ class SemSystemSelect(SemEntityProxyMixin, SelectEntity):
                 f"Source list changed while setting {self._entity_key}"
             )
 
-        for entity_id, source_option in zip(entity_ids, translated_options):
-            await self.hass.services.async_call(
-                "select",
-                "select_option",
-                {"entity_id": entity_id, "option": source_option},
-                blocking=True,
+        results = await asyncio.gather(
+            *(
+                self.hass.services.async_call(
+                    "select",
+                    "select_option",
+                    {"entity_id": entity_id, "option": source_option},
+                    blocking=True,
+                )
+                for entity_id, source_option in zip(
+                    entity_ids, translated_options
+                )
+            ),
+            return_exceptions=True,
+        )
+        failures = [
+            f"{entity_id}: {result}"
+            for entity_id, result in zip(entity_ids, results)
+            if isinstance(result, Exception)
+        ]
+        if failures:
+            raise HomeAssistantError(
+                "The selection could not be applied to every battery: "
+                + "; ".join(failures)
             )
 
     @property
