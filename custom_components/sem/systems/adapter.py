@@ -120,6 +120,7 @@ class SemSystemAdapter(ABC):
         """Translate a source integration option into a SEM option."""
         return source_option
 
+    @abstractmethod
     async def async_execute(
         self,
         hass: HomeAssistant,
