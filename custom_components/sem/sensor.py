@@ -12,6 +12,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import DOMAIN
@@ -136,6 +137,12 @@ class SemEntityStatusSensor(SensorEntity):
         self._registry = registry
         self._manager = manager
         self._attr_unique_id = "sem_entity_status"
+        self._attr_device_info = DeviceInfo(
+            identifiers={(DOMAIN, "huawei_entity_bridge")},
+            name="SEM Energy System",
+            manufacturer="SEM",
+            model="Energy system adapter",
+        )
         self._source_entity_ids: list[str] = []
         self._source_unsub = None
         self._last_logged_mismatch_signature = None
