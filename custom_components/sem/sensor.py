@@ -170,7 +170,11 @@ class SemEntityStatusSensor(SensorEntity):
             "sources", []
         )
 
-        def describe_source(source: dict, issue: str) -> dict:
+        def describe_source(
+            source: dict,
+            issue: str,
+            entity_name_override: str | None = None,
+        ) -> dict:
             entity_id = source.get("entity_id")
             device_id = source.get("device_id")
             entity_entry = (
@@ -187,34 +191,44 @@ class SemEntityStatusSensor(SensorEntity):
                 "device_id": device_id,
                 "entity_id": entity_id,
                 "entity_name": (
-                    entity_entry.name or entity_entry.original_name
-                    if entity_entry else "Rated Capacity"
+                    entity_name_override
+                    or (
+                        entity_entry.name or entity_entry.original_name
+                        if entity_entry else "Rated Capacity"
+                    )
                 ),
                 "issue": issue,
             }
 
+        capacity_by_device = {
+            source.get("device_id"): source
+            for source in capacity_sources
+            if source.get("device_id")
+        }
         affected_devices = []
+        for battery_source in soc_sources:
+            device_id = battery_source.get("device_id")
+            capacity_source = capacity_by_device.get(device_id)
+            if capacity_source is not None:
+                affected_devices.append(
+                    describe_source(capacity_source, "Entiteten är inaktiverad")
+                )
+            else:
+                affected_devices.append(
+                    describe_source(
+                        battery_source,
+                        "Rated Capacity saknas eller har inte skapats",
+                        "Rated Capacity",
+                    )
+                )
+
         if status == "disabled":
-            affected_devices = [
-                describe_source(source, "Entiteten är inaktiverad")
-                for source in capacity_sources
-            ]
             message = (
                 "SEM kan inte beräkna batteriernas totala kapacitet eller "
-                "kapacitetsviktade SOC eftersom Huawei-entiteten "
-                "'Rated Capacity' är inaktiverad på en eller flera batterienheter."
+                "kapacitetsviktade SOC eftersom 'Rated Capacity' är inaktiverad "
+                "eller saknas på en eller flera batterienheter."
             )
         else:
-            capacity_device_ids = {
-                source.get("device_id")
-                for source in capacity_sources
-                if source.get("device_id")
-            }
-            affected_devices = [
-                describe_source(source, "Rated Capacity hittades inte")
-                for source in soc_sources
-                if source.get("device_id") not in capacity_device_ids
-            ]
             message = (
                 "SEM hittar inte Huawei-entiteten 'Rated Capacity' för alla "
                 "identifierade batterienheter. Total batterikapacitet och "
