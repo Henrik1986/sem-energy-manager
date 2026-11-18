@@ -1,0 +1,1 @@
+"""External energy system adapters."""

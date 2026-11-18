@@ -56,7 +56,6 @@ def install_sem_files(base: str, data: bytes) -> None:
     os.remove(tmp_zip)
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
-
 class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1

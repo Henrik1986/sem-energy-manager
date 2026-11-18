@@ -1,0 +1,29 @@
+set_battery_time_of_use_periods:
+  name: Set battery time-of-use periods
+  description: Configure the battery time-of-use schedule through the active energy-system adapter.
+  fields:
+    periods:
+      name: Periods
+      description: Time-of-use periods in the format supported by the active adapter.
+      required: true
+      example: "00:00-23:59/1234567/+"
+      selector:
+        text:
+
+set_grid_export_power_limit:
+  name: Set grid export power limit
+  description: Set the maximum power that may be fed to the electricity grid.
+  fields:
+    power:
+      name: Power
+      description: Maximum feed-in power in watts.
+      required: true
+      example: 300
+      selector:
+        number:
+          min: 0
+          mode: box
+
+reset_grid_export_power_limit:
+  name: Reset grid export power limit
+  description: Remove the configured grid export power limit through the active energy-system adapter.

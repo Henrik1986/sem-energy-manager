@@ -19,3 +19,21 @@ Din anläggning måste vara integrerad med Home Assistant.
 
 Systemet har stöd för
 - Huawei – https://github.com/wlcrs/huawei_solar
+
+### Huawei – kontrollera före installation av SEM
+
+Om du använder Huawei Solar ska sensorn **Rated Capacity** vara aktiverad i Home Assistant innan SEM installeras.
+
+Gör så här för varje batterienhet:
+1. Öppna **Inställningar → Enheter och tjänster → Huawei Solar**.
+2. Öppna batterienheten som heter **Batteries** eller **Connected energy storage**.
+3. Aktivera entiteten **Rated Capacity**.
+4. Kontrollera att sensorn visar batteriets nominella kapacitet i Wh.
+
+SEM använder denna kapacitet för att beräkna en korrekt kapacitetsviktad SOC när flera batterier finns. SEM aktiverar inte sensorn automatiskt. Om den saknas eller är inaktiverad visas ett installationsfel i SEM:s entitetsstatus.
+
+### Flera Huawei-växelriktare
+
+SEM kan samla flera Huawei-växelriktare och batterier till en gemensam anläggning, både när de är kopplade via master/slav och när de är inlagda som separata Huawei Solar-anslutningar.
+
+I den här versionen behandlas samtliga aktiva Huawei Solar-anslutningar som en och samma SEM-anläggning. Använd därför inte denna funktion för två fristående Huawei-anläggningar.
