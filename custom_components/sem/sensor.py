@@ -134,7 +134,7 @@ class SemEntityStatusSensor(SensorEntity):
     """Expose resolver status and live multi-device diagnostics."""
 
     _attr_has_entity_name = True
-    _attr_name = "SEM Entity Status"
+    _attr_name = "Entity Status"
     _attr_icon = "mdi:database-check"
 
     def __init__(self, registry: SemEntityRegistry, manager) -> None:
