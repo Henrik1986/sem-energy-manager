@@ -20,6 +20,7 @@ from .systems.registry import SemEntityRegistry
 
 _LOGGER = logging.getLogger(__name__)
 
+
 def _migrate_entity_status_id(hass: HomeAssistant) -> None:
     """Rename the default Entity Status ID without overriding user changes."""
     registry = er.async_get(hass)
