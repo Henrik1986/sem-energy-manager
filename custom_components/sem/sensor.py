@@ -10,6 +10,8 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.event import async_track_state_change_event
 
 from .const import DOMAIN
@@ -115,46 +117,134 @@ class SemEntityStatusSensor(SensorEntity):
     def extra_state_attributes(self) -> dict:
         attributes = self._registry.as_dict()
         attributes.pop("status", None)
-        attributes["setup_errors"] = self._get_setup_errors(attributes)
-        attributes["runtime_diagnostics"] = self._manager.get_runtime_diagnostics()
+
+        setup_errors = self._get_setup_errors(attributes)
+        diagnostics = self._manager.get_runtime_diagnostics()
+        attributes["setup_errors"] = setup_errors
+        attributes["runtime_diagnostics"] = diagnostics
+
+        if setup_errors:
+            attributes["status_message"] = setup_errors[0]["message"]
+            attributes["action_required"] = setup_errors[0]["action"]
+        elif diagnostics.get("setting_mismatches"):
+            attributes["status_message"] = (
+                "En eller flera inställningar skiljer sig mellan "
+                "batterienheterna. SEM kan därför inte visa ett gemensamt värde."
+            )
+            attributes["action_required"] = (
+                "Ändra inställningarna via SEM eller kontrollera i Huawei Solar "
+                "att samtliga batterienheter har samma värde."
+            )
+        elif self._registry.get_status() == "OK":
+            attributes["status_message"] = (
+                "Alla obligatoriska entiteter hittades. SEM är redo."
+            )
+            attributes["action_required"] = "Ingen åtgärd behövs."
+        else:
+            attributes["status_message"] = (
+                "SEM hittar inte alla obligatoriska entiteter."
+            )
+            attributes["action_required"] = (
+                "Kontrollera attributen 'missing_entities' och "
+                "'ambiguous_entities' för att se vilka entiteter som behöver "
+                "åtgärdas."
+            )
+
         return attributes
 
-    @staticmethod
-    def _get_setup_errors(attributes: dict) -> list[dict]:
+    def _get_setup_errors(self, attributes: dict) -> list[dict]:
         """Build actionable setup errors for required system entities."""
         errors = []
         huawei = attributes.get("systems", {}).get("huawei", {})
-        capacity = huawei.get("entities", {}).get("battery_rated_capacity", {})
+        entities = huawei.get("entities", {})
+        capacity = entities.get("battery_rated_capacity", {})
         status = capacity.get("status")
 
-        if status == "disabled":
-            errors.append({
-                "code": "huawei_battery_capacity_disabled",
-                "message": (
-                    "Huawei: Entiteten för batteriets nominella kapacitet "
-                    "är inaktiverad."
-                ),
-                "action": (
-                    "Aktivera entiteten 'Rated Capacity' under varje "
-                    "batterienhet i Home Assistant och starta sedan om SEM."
-                ),
-                "entities": capacity.get("matches", []),
-            })
-        elif status == "missing":
-            errors.append({
-                "code": "huawei_battery_capacity_missing",
-                "message": (
-                    "Huawei: SEM hittar inte kapacitetsentiteten för alla "
-                    "identifierade batterisystem."
-                ),
-                "action": (
-                    "Kontrollera att 'Rated Capacity' finns och är aktiverad "
-                    "för varje batterienhet i Home Assistant."
-                ),
-                "entities": capacity.get("matches", []),
-            })
+        if status not in {"disabled", "missing"}:
+            return errors
 
-        return errors
+        entity_registry = er.async_get(self.hass)
+        device_registry = dr.async_get(self.hass)
+        capacity_sources = capacity.get("sources", [])
+        soc_sources = entities.get("battery_state_of_capacity", {}).get(
+            "sources", []
+        )
+
+        def describe_source(source: dict, issue: str) -> dict:
+            entity_id = source.get("entity_id")
+            device_id = source.get("device_id")
+            entity_entry = (
+                entity_registry.async_get(entity_id) if entity_id else None
+            )
+            device_entry = (
+                device_registry.async_get(device_id) if device_id else None
+            )
+            return {
+                "device_name": (
+                    device_entry.name_by_user or device_entry.name
+                    if device_entry else "Okänd batterienhet"
+                ),
+                "device_id": device_id,
+                "entity_id": entity_id,
+                "entity_name": (
+                    entity_entry.name or entity_entry.original_name
+                    if entity_entry else "Rated Capacity"
+                ),
+                "issue": issue,
+            }
+
+        affected_devices = []
+        if status == "disabled":
+            affected_devices = [
+                describe_source(source, "Entiteten är inaktiverad")
+                for source in capacity_sources
+            ]
+            message = (
+                "SEM kan inte beräkna batteriernas totala kapacitet eller "
+                "kapacitetsviktade SOC eftersom Huawei-entiteten "
+                "'Rated Capacity' är inaktiverad på en eller flera batterienheter."
+            )
+        else:
+            capacity_device_ids = {
+                source.get("device_id")
+                for source in capacity_sources
+                if source.get("device_id")
+            }
+            affected_devices = [
+                describe_source(source, "Rated Capacity hittades inte")
+                for source in soc_sources
+                if source.get("device_id") not in capacity_device_ids
+            ]
+            message = (
+                "SEM hittar inte Huawei-entiteten 'Rated Capacity' för alla "
+                "identifierade batterienheter. Total batterikapacitet och "
+                "kapacitetsviktad SOC kan därför inte beräknas korrekt."
+            )
+
+        action = (
+            "Aktivera 'Rated Capacity' i Huawei Solar för varje batterienhet "
+            "och ladda därefter om SEM-integrationen. Home Assistant behöver "
+            "inte startas om."
+        )
+
+        return [{
+            "code": (
+                "huawei_battery_capacity_disabled"
+                if status == "disabled"
+                else "huawei_battery_capacity_missing"
+            ),
+            "message": message,
+            "action": action,
+            "steps": [
+                "Öppna Inställningar → Enheter och tjänster → Enheter.",
+                "Öppna varje Huawei-batterienhet (Connected Energy Storage).",
+                "Under Entiteter aktiverar du 'Rated Capacity'. Upprepa för "
+                "samtliga batterienheter i anläggningen.",
+                "Öppna SEM-integrationen och välj Ladda om.",
+            ],
+            "affected_devices": affected_devices,
+            "entities": capacity.get("matches", []),
+        }]
 
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
