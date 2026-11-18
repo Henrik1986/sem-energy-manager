@@ -63,19 +63,23 @@ async def async_setup_entry(
     package_path = hass.config.path("sem")
     info = await hass.async_add_executor_job(check_installation, package_path)
 
-    entities = [SemInstallationStatusSensor(info)]
+    entities = []
     entity_registry = hass.data[DOMAIN]["entity_registries"].get(entry.entry_id)
     system_manager = hass.data[DOMAIN]["system_managers"].get(entry.entry_id)
 
     if entity_registry is not None and system_manager is not None:
         _migrate_entity_status_id(hass)
         entities.append(SemEntityStatusSensor(entity_registry, system_manager))
+    else:
+        _LOGGER.error("SEM entity registry not found")
+
+    entities.append(SemInstallationStatusSensor(info))
+
+    if system_manager is not None:
         entities.extend(
             SemSystemSensor(system_manager, *definition)
             for definition in SENSOR_ENTITY_DEFINITIONS
         )
-    else:
-        _LOGGER.error("SEM entity registry not found")
 
     async_add_entities(entities)
 
@@ -150,9 +154,12 @@ class SemEntityStatusSensor(SensorEntity):
     @property
     def native_value(self) -> str:
         diagnostics = self._manager.get_runtime_diagnostics()
-        if diagnostics.get("setting_mismatches"):
-            return "FEL"
-        return self._registry.get_status()
+        if (
+            diagnostics.get("setting_mismatches")
+            or self._registry.get_status() != "OK"
+        ):
+            return "ERROR - Check log"
+        return "OK"
 
     @property
     def extra_state_attributes(self) -> dict:
