@@ -20,6 +20,37 @@ from .systems.registry import SemEntityRegistry
 
 _LOGGER = logging.getLogger(__name__)
 
+def _migrate_entity_status_id(hass: HomeAssistant) -> None:
+    """Rename the default Entity Status ID without overriding user changes."""
+    registry = er.async_get(hass)
+    current_entity_id = registry.async_get_entity_id(
+        "sensor",
+        DOMAIN,
+        "sem_entity_status",
+    )
+    if current_entity_id != "sensor.entity_status":
+        return
+
+    target_entity_id = "sensor.sem_entity_status"
+    if registry.async_get(target_entity_id) is not None:
+        _LOGGER.warning(
+            "SEM: Could not rename %s to %s because the target ID is already "
+            "in use. Rename the existing entity manually if desired.",
+            current_entity_id,
+            target_entity_id,
+        )
+        return
+
+    registry.async_update_entity(
+        current_entity_id,
+        new_entity_id=target_entity_id,
+    )
+    _LOGGER.info(
+        "SEM: Renamed entity %s to %s",
+        current_entity_id,
+        target_entity_id,
+    )
+
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -35,6 +66,7 @@ async def async_setup_entry(
     system_manager = hass.data[DOMAIN]["system_managers"].get(entry.entry_id)
 
     if entity_registry is not None and system_manager is not None:
+        _migrate_entity_status_id(hass)
         entities.append(SemEntityStatusSensor(entity_registry, system_manager))
         entities.extend(
             SemSystemSensor(system_manager, *definition)
@@ -96,7 +128,7 @@ class SemEntityStatusSensor(SensorEntity):
     """Expose resolver status and live multi-device diagnostics."""
 
     _attr_has_entity_name = True
-    _attr_name = "Entity Status"
+    _attr_name = "SEM Entity Status"
     _attr_icon = "mdi:database-check"
 
     def __init__(self, registry: SemEntityRegistry, manager) -> None:
@@ -105,6 +137,7 @@ class SemEntityStatusSensor(SensorEntity):
         self._attr_unique_id = "sem_entity_status"
         self._source_entity_ids: list[str] = []
         self._source_unsub = None
+        self._last_logged_mismatch_signature = None
 
     @property
     def native_value(self) -> str:
@@ -120,21 +153,17 @@ class SemEntityStatusSensor(SensorEntity):
 
         setup_errors = self._get_setup_errors(attributes)
         diagnostics = self._manager.get_runtime_diagnostics()
+        runtime_errors = self._get_runtime_errors(diagnostics)
         attributes["setup_errors"] = setup_errors
         attributes["runtime_diagnostics"] = diagnostics
+        attributes["runtime_errors"] = runtime_errors
 
         if setup_errors:
             attributes["status_message"] = setup_errors[0]["message"]
             attributes["action_required"] = setup_errors[0]["action"]
-        elif diagnostics.get("setting_mismatches"):
-            attributes["status_message"] = (
-                "En eller flera inställningar skiljer sig mellan "
-                "batterienheterna. SEM kan därför inte visa ett gemensamt värde."
-            )
-            attributes["action_required"] = (
-                "Ändra inställningarna via SEM eller kontrollera i Huawei Solar "
-                "att samtliga batterienheter har samma värde."
-            )
+        elif runtime_errors:
+            attributes["status_message"] = runtime_errors[0]["message"]
+            attributes["action_required"] = runtime_errors[0]["action"]
         elif self._registry.get_status() == "OK":
             attributes["status_message"] = (
                 "Alla obligatoriska entiteter hittades. SEM är redo."
@@ -267,6 +296,125 @@ class SemEntityStatusSensor(SensorEntity):
         )
         self.async_on_remove(self._remove_source_listener)
         self._refresh_source_listener()
+        self._log_runtime_mismatches()
+
+    def _get_runtime_errors(self, diagnostics: dict) -> list[dict]:
+        """Turn runtime mismatches into clear instructions for the user."""
+        setting_labels = {
+            "battery_working_mode": "Batteriets arbetsläge",
+            "grid_charge_maximum_power": "Maximal nätladdning",
+            "maximum_discharging_power": "Maximal urladdningseffekt",
+            "end_of_discharge_soc": "Urladdningsgräns (SOC)",
+            "power_meter_active_power": "Huawei-effektmätarens värden",
+        }
+        entity_registry = er.async_get(self.hass)
+        device_registry = dr.async_get(self.hass)
+        errors = []
+
+        for mismatch in diagnostics.get("setting_mismatches", []):
+            entity_key = mismatch.get("entity", "unknown")
+            label = setting_labels.get(entity_key, entity_key)
+            details = []
+
+            for source in mismatch.get("sources", []):
+                entity_id = source.get("entity_id")
+                value = source.get("value")
+                entity_entry = (
+                    entity_registry.async_get(entity_id) if entity_id else None
+                )
+                device_entry = (
+                    device_registry.async_get(entity_entry.device_id)
+                    if entity_entry and entity_entry.device_id
+                    else None
+                )
+                device_name = (
+                    device_entry.name_by_user or device_entry.name
+                    if device_entry
+                    else entity_id or "Okänd enhet"
+                )
+
+                if isinstance(value, (int, float)):
+                    formatted_value = f"{value:g}"
+                else:
+                    formatted_value = str(value) if value is not None else "okänt"
+
+                state = self.hass.states.get(entity_id) if entity_id else None
+                unit = (
+                    state.attributes.get("unit_of_measurement")
+                    if state is not None
+                    else None
+                )
+                if unit:
+                    formatted_value = f"{formatted_value} {unit}"
+
+                details.append({
+                    "device": device_name,
+                    "entity_id": entity_id,
+                    "value": formatted_value,
+                })
+
+            if entity_key == "power_meter_active_power":
+                message = mismatch.get("message") or (
+                    f"{label} rapporterar värden som inte stämmer överens."
+                )
+                action = (
+                    "Kontrollera Huawei-effektmätarna och deras anslutningar. "
+                    "SEM använder inte ett osäkert mätvärde."
+                )
+            else:
+                values_text = "; ".join(
+                    f"{item['device']}: {item['value']}"
+                    for item in details
+                )
+                message = (
+                    f"{label} har olika värden mellan Huawei-enheterna: "
+                    f"{values_text}."
+                )
+                action = (
+                    f"Ställ in samma värde för {label.lower()} på samtliga "
+                    "Huawei-enheter. Ändra via SEM eller direkt i Huawei Solar. "
+                    "När värdena överensstämmer visas ett gemensamt värde i SEM."
+                )
+
+            errors.append({
+                "code": f"sem_mismatch_{entity_key}",
+                "setting": label,
+                "message": message,
+                "action": action,
+                "sources": details,
+            })
+
+        return errors
+
+    @callback
+    def _log_runtime_mismatches(self) -> None:
+        """Log each new or changed mismatch once, avoiding repeated warnings."""
+        diagnostics = self._manager.get_runtime_diagnostics()
+        errors = self._get_runtime_errors(diagnostics)
+        if not errors:
+            self._last_logged_mismatch_signature = None
+            return
+
+        signature = tuple(
+            (
+                error["code"],
+                tuple(
+                    (source["entity_id"], source["value"])
+                    for source in error["sources"]
+                ),
+            )
+            for error in errors
+        )
+        if signature == self._last_logged_mismatch_signature:
+            return
+
+        self._last_logged_mismatch_signature = signature
+        for error in errors:
+            _LOGGER.warning(
+                "SEM: %s Åtgärd: %s",
+                error["message"],
+                error["action"],
+            )
 
     @callback
     def _refresh_source_listener(self) -> None:
@@ -302,12 +450,14 @@ class SemEntityStatusSensor(SensorEntity):
 
     @callback
     def _handle_source_state_change(self, event) -> None:
-        """Refresh dynamic mismatch diagnostics after a physical change."""
+        """Refresh and log dynamic mismatch diagnostics after a source change."""
+        self._log_runtime_mismatches()
         self.async_write_ha_state()
 
     @callback
     def _handle_registry_update(self) -> None:
         self._refresh_source_listener()
+        self._log_runtime_mismatches()
         self.async_write_ha_state()
 
 
