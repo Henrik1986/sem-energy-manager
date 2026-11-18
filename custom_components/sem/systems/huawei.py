@@ -305,9 +305,12 @@ def _store_expected_sources(
         )
     elif status == "disabled":
         _LOGGER.error(
-            "Huawei resolver: %s is disabled for device IDs %s",
+            "Huawei resolver: Required entity '%s' is disabled for device IDs %s. "
+            "Disabled entity IDs: %s. Enable the entity in Huawei Solar on each "
+            "affected device, then reload SEM.",
             entity_key,
             missing,
+            [match.entity_id for match in disabled_matches],
         )
     else:
         _LOGGER.error(
