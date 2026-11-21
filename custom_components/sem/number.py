@@ -82,6 +82,11 @@ class SemSystemNumber(SemEntityProxyMixin, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Validate the requested value against every physical number entity."""
+        if not self._manager.is_entity_writable(self._entity_key):
+            raise HomeAssistantError(
+                f"SEM entity {self._entity_key} does not support writes"
+            )
+
         states = self.source_states
         if not states or any(state is None for state in states):
             raise HomeAssistantError(
@@ -132,6 +137,8 @@ class SemSystemNumber(SemEntityProxyMixin, NumberEntity):
         ]
         return (
             super().available
+            and self._manager.is_entity_readable(self._entity_key)
+            and self._manager.is_entity_writable(self._entity_key)
             and len(attributes) == len(states)
             and bool(self._manager.get_number_metadata(
                 self._entity_key, attributes
