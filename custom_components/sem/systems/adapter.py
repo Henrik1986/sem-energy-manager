@@ -178,8 +178,25 @@ class SemSystemAdapter(ABC):
         hass: HomeAssistant,
         registry: SemEntityRegistry,
     ) -> dict[str, Any]:
-        """Return live warnings about mismatched physical source values."""
+        """Return provider-specific diagnostic data for the status sensor."""
         return {}
+
+    def get_setup_errors(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+    ) -> list[dict[str, Any]]:
+        """Return actionable setup errors in the shared SEM error format."""
+        return []
+
+    def get_runtime_errors(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        diagnostics: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Return actionable runtime errors in the shared SEM error format."""
+        return []
 
     @abstractmethod
     async def async_execute(
