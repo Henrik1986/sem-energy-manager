@@ -156,6 +156,7 @@ class SemEntityStatusSensor(SensorEntity):
         diagnostics = self._manager.get_runtime_diagnostics()
         if (
             diagnostics.get("setting_mismatches")
+            or diagnostics.get("errors")
             or self._registry.get_status() != "OK"
         ):
             return "ERROR - Check log"
@@ -398,6 +399,17 @@ class SemEntityStatusSensor(SensorEntity):
                 "action": action,
                 "sources": details,
             })
+
+        for error in diagnostics.get("errors", []):
+            errors.append(
+                {
+                    "code": error.get("code", "sem_runtime_error"),
+                    "setting": error.get("setting", "Systemdiagnostik"),
+                    "message": error.get("message", "Ett systemfel har upptäckts."),
+                    "action": error.get("action", "Kontrollera systemets diagnostik."),
+                    "sources": error.get("sources", []),
+                }
+            )
 
         return errors
 
