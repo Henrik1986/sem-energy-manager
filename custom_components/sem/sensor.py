@@ -213,10 +213,11 @@ class SemEntityStatusSensor(SensorEntity):
 
         signature = tuple(
             (
-                error["code"],
+                error.get("code"),
+                error.get("message"),
                 tuple(
-                    (source["entity_id"], source["value"])
-                    for source in error["sources"]
+                    (source.get("entity_id"), source.get("value"))
+                    for source in error.get("sources", [])
                 ),
             )
             for error in errors
