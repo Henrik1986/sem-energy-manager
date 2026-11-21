@@ -6,7 +6,7 @@ from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
-from .systems.huawei_aggregation import value_fits_number_metadata
+from .systems.aggregation import value_fits_number_metadata
 from .systems.proxy import NUMBER_ENTITY_DEFINITIONS, SemEntityProxyMixin
 
 
