@@ -152,9 +152,14 @@ class SemEntityStatusSensor(SensorEntity):
 
     @property
     def native_value(self) -> str:
+        setup_errors = self._manager.get_setup_errors()
         diagnostics = self._manager.get_runtime_diagnostics()
         runtime_errors = self._manager.get_runtime_errors(diagnostics)
-        if runtime_errors or self._registry.get_status() != "OK":
+        if (
+            setup_errors
+            or runtime_errors
+            or self._registry.get_status() != "OK"
+        ):
             return "ERROR - Check log"
         return "OK"
 
