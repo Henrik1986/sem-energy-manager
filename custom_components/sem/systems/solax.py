@@ -38,6 +38,10 @@ SOLAX_NIGHT_CHARGE_SWITCH_SOURCE_KEY = "selfuse_night_charge_enable"
 SOLAX_NIGHT_CHARGE_ENTITY_KEY = "battery_night_charge_enable"
 SOLAX_TOU_PERIOD2_SWITCH_SOURCE_KEY = "charge_and_discharge_period2_enable"
 SOLAX_TOU_PERIOD2_ENTITY_KEY = "battery_tou_period2_enable"
+SOLAX_END_OF_DISCHARGE_SOC_SOURCE_KEYS = (
+    "selfuse_discharge_min_soc",
+    "feedin_discharge_min_soc",
+)
 
 # SEM registry key -> SolaX Modbus time entity unique-ID suffix.
 SOLAX_TOU_TIME_ENTITY_MAP = {
@@ -69,6 +73,7 @@ SOLAX_OPTIONAL_ENTITIES = (
     "battery_day_charge",
     "battery_day_discharge",
     "inverter_input_power",
+    "end_of_discharge_soc",
     *SOLAX_TOU_OPTIONAL_ENTITIES,
 )
 
@@ -457,6 +462,107 @@ def _resolve_expected_sources(
     )
 
 
+def _resolve_paired_number_sources(
+    registry: SemEntityRegistry,
+    device_registry: dr.DeviceRegistry,
+    *,
+    entity_key: str,
+    matches: Sequence[Any],
+    expected_device_ids: Sequence[str],
+    source_keys: Sequence[str],
+) -> None:
+    """Resolve every configured number source key once per battery inverter."""
+    active_by_source: dict[tuple[str, str], list[Any]] = defaultdict(list)
+    disabled_by_source: dict[tuple[str, str], list[Any]] = defaultdict(list)
+    expected_pairs = [
+        (device_id, source_key)
+        for device_id in expected_device_ids
+        for source_key in source_keys
+    ]
+
+    for entity_entry in matches:
+        device_id = entity_entry.device_id
+        if device_id is None or device_id not in expected_device_ids:
+            continue
+        source_key = next(
+            (
+                key
+                for key in source_keys
+                if _entity_key_matches(entity_entry.unique_id, key)
+            ),
+            None,
+        )
+        if source_key is None:
+            continue
+
+        target = (
+            active_by_source
+            if _disabled_by(entity_entry) is None
+            else disabled_by_source
+        )
+        target[(device_id, source_key)].append(entity_entry)
+
+    duplicates = [
+        pair
+        for pair in expected_pairs
+        if len(active_by_source.get(pair, [])) > 1
+    ]
+    missing = [
+        pair
+        for pair in expected_pairs
+        if not active_by_source.get(pair)
+    ]
+    all_matches = [
+        entity_entry
+        for pair in expected_pairs
+        for entity_entry in (
+            active_by_source.get(pair, [])
+            + disabled_by_source.get(pair, [])
+        )
+    ]
+
+    if not expected_device_ids or not source_keys:
+        status = "missing"
+        selected = []
+    elif duplicates:
+        status = "ambiguous"
+        selected = [
+            entity_entry
+            for pair in expected_pairs
+            for entity_entry in active_by_source.get(pair, [])
+        ]
+    elif missing:
+        status = (
+            "disabled"
+            if any(disabled_by_source.get(pair) for pair in missing)
+            else "missing"
+        )
+        selected = all_matches
+    else:
+        status = "found"
+        selected = [
+            active_by_source[pair][0]
+            for pair in expected_pairs
+        ]
+
+    sources = [
+        _source_from_entry(entity_entry, device_registry)
+        for entity_entry in selected
+    ]
+    registry.set_entity_result(
+        SOLAX_SYSTEM_ID,
+        entity_key,
+        status=status,
+        entity_id=sources[0].entity_id if sources else None,
+        unique_id=sources[0].unique_id if sources else None,
+        platform=SOLAX_DOMAIN if sources else None,
+        device_id=sources[0].device_id if sources else None,
+        config_entry_id=sources[0].config_entry_id if sources else None,
+        matches=[entity_entry.entity_id for entity_entry in all_matches],
+        sources=sources,
+    )
+
+
 def _resolve_any_sources(
     registry: SemEntityRegistry,
     device_registry: dr.DeviceRegistry,
@@ -649,6 +755,27 @@ class SolaXAdapter(SemSystemAdapter):
             if entry.device_id is not None:
                 entities_by_device[entry.device_id].append(entry)
 
+        # Both SolaX discharge thresholds back the single SEM end-of-discharge
+        # setting. Require exactly one enabled number entity for each threshold
+        # on every battery inverter before exposing the SEM number.
+        end_of_discharge_matches = [
+            entry
+            for entry in entity_entries
+            if entry.domain == "number"
+            and any(
+                _entity_key_matches(entry.unique_id, source_key)
+                for source_key in SOLAX_END_OF_DISCHARGE_SOC_SOURCE_KEYS
+            )
+        ]
+        _resolve_paired_number_sources(
+            registry,
+            device_registry,
+            entity_key="end_of_discharge_soc",
+            matches=end_of_discharge_matches,
+            expected_device_ids=battery_device_ids,
+            source_keys=SOLAX_END_OF_DISCHARGE_SOC_SOURCE_KEYS,
+        )
+
         # Resolve SOC with a generation-aware source key.
         soc_matches = []
         soc_expected_ids = []
@@ -817,7 +944,14 @@ class SolaXAdapter(SemSystemAdapter):
                 ),
                 "write.grid_charge_maximum_power": "not_supported",
                 "write.maximum_discharging_power": "not_supported",
-                "write.end_of_discharge_soc": "not_implemented",
+                "write.end_of_discharge_soc": (
+                    "implemented"
+                    if registry.get_entity_status(
+                        SOLAX_SYSTEM_ID,
+                        "end_of_discharge_soc",
+                    ) == "found"
+                    else "not_configured"
+                ),
                 "write.grid_export_power_limit": "not_implemented",
                 "write.time_of_use": "gen4_5_only",
             }
