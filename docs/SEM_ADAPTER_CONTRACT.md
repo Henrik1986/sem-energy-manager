@@ -109,6 +109,14 @@ The manager checks these declarations before returning sensor values, exposing n
 
 The shared adapter contract also owns setup and runtime error reporting. Adapters provide structured diagnostic data plus actionable setup/runtime error entries; the status sensor only displays those entries and does not inspect provider identifiers or source-specific settings.
 
+Each setup/runtime error entry must contain:
+
+- `code`: stable machine-readable error identifier.
+- `message`: user-facing description of the problem.
+- `action`: user-facing instruction for resolving it.
+
+Entries may also include `steps`, `affected_devices`, `entities`, and `setting`. An optional `sources` list can provide per-source `entity_id` and `value` fields for change-aware logging. The shared status sensor treats the remaining diagnostic payload as adapter-owned data and passes it through unchanged in `runtime_diagnostics`.
+
 ## 9. Implementation notes for the shared layer
 
 The shared adapter boundary is `SemSystemAdapter`, coordinated by `SemSystemManager`, with `SemEntityRegistry` tracking physical sources and the sensor/select/number proxy entities exposing the stable SEM interface.
