@@ -93,14 +93,26 @@ The current manager activates an adapter only when exactly one energy system is 
 
 An unavailable or invalid source must not silently contribute zero or produce a partial aggregate.
 
-The present Huawei registry marks all 11 logical entities above as required. Its overall status therefore becomes an error if any one is missing. This is a current implementation detail, not a suitable rule for every future system: the next architecture step must distinguish core requirements from optional measurements and independently report read, write, and command capabilities.
+Each adapter declares a `SystemCapabilities` object:
 
-Diagnostics must be provider-neutral at the SEM boundary. Huawei-specific discovery details and error interpretation belong inside the Huawei adapter; the public status sensor should consume common diagnostic results rather than assume the active provider is Huawei.
+- Every logical entity has an `EntityCapability`.
+- `required` determines whether a missing or unresolved entity makes the system status fail.
+- `readable` declares whether the entity provides data to SEM.
+- `writable` declares whether SEM may send writes through that entity.
+- `commands` lists the generic SEM services implemented by the adapter.
+
+Only missing required entities affect the overall system status. Missing optional entities are listed separately as `optional_missing_entities` in the entity-status data. Entity-level capability declarations and supported commands are also exposed in the status sensor attributes.
+
+The Huawei adapter deliberately marks all 11 current logical entities as required. This preserves the published Huawei resolver's existing setup requirements. It marks the working-mode select and three number controls as writable, and declares the three SEM commands used by the current YAML. Future adapters can classify measurements that are not essential to their own operation as optional and can independently declare read, write, and command support.
+
+The manager checks these declarations before returning sensor values, exposing number/select controls for use, accepting writes, or executing a SEM command. A service that is not declared by the active adapter is rejected.
+
+Provider-neutral capability reporting is now in place. Some detailed setup/runtime error text in the status sensor is still Huawei-specific and should be moved behind the adapter diagnostic interface before another provider is integrated.
 
 ## 9. Implementation notes for the shared layer
 
-The shared adapter boundary is currently `SemSystemAdapter`, coordinated by `SemSystemManager`, with `SemEntityRegistry` tracking physical sources and the sensor/select/number proxy entities exposing the stable SEM interface.
+The shared adapter boundary is `SemSystemAdapter`, coordinated by `SemSystemManager`, with `SemEntityRegistry` tracking physical sources and the sensor/select/number proxy entities exposing the stable SEM interface.
 
-Before adding another provider, generic aggregation and validation helpers should be moved out of the Huawei-named `huawei_aggregation.py` module. In particular, the shared number validation currently imported by `number.py` must not depend on a Huawei-named module. Keep the Huawei behavior and tests unchanged during that extraction.
+Provider-independent aggregation and validation helpers now live in `systems/aggregation.py`; the shared number entity no longer imports a Huawei-named helper module. The capability definitions live in `systems/capabilities.py`.
 
-The next implementation step is to formalize the capability model and move provider-neutral helper logic into the shared layer. The Huawei adapter remains the regression reference throughout.
+The Huawei adapter remains the regression reference. The next implementation step is to make setup/runtime diagnostics provider-neutral, then use the common contract to introduce and test another adapter without changing the YAML-facing entities or services.
