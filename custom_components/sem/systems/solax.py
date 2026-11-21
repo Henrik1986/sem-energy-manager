@@ -260,7 +260,10 @@ def _resolve_expected_sources(
         )
     ]
 
-    if duplicates:
+    if not expected_device_ids:
+        status = "missing"
+        selected = []
+    elif duplicates:
         status = "ambiguous"
         selected = [
             entry
@@ -365,6 +368,7 @@ class SolaXAdapter(SemSystemAdapter):
 
     def __init__(self) -> None:
         self._hass: HomeAssistant | None = None
+        self._registry: SemEntityRegistry | None = None
 
     async def async_setup(
         self,
@@ -373,6 +377,7 @@ class SolaXAdapter(SemSystemAdapter):
     ) -> None:
         """Wait for SolaX, then resolve entities on the inverter devices."""
         self._hass = hass
+        self._registry = registry
         entries = [
             entry
             for entry in hass.config_entries.async_entries(SOLAX_DOMAIN)
@@ -678,16 +683,25 @@ class SolaXAdapter(SemSystemAdapter):
             self.system_id,
             "battery_state_of_capacity",
         )
+        capacity_by_device = self._get_capacity_by_device()
+        soc_device_ids = {
+            source.device_id
+            for source in soc_sources
+            if source.device_id is not None
+        }
         if (
             registry.get_entity_status(
                 self.system_id,
                 "battery_state_of_capacity",
             ) == "found"
-            and len(soc_sources) > 1
-            and registry.get_entity_status(
-                self.system_id,
-                "battery_rated_capacity",
-            ) != "found"
+            and len(soc_device_ids) > 1
+            and (
+                registry.get_entity_status(
+                    self.system_id,
+                    "battery_rated_capacity",
+                ) != "found"
+                or set(capacity_by_device) != soc_device_ids
+            )
         ):
             errors.append(
                 {
@@ -755,15 +769,14 @@ class SolaXAdapter(SemSystemAdapter):
 
     def _get_sources(self, entity_key: str) -> list[EntitySource]:
         """Return resolved sources for one SEM key."""
-        if self._hass is None:
+        if self._hass is None or self._registry is None:
             return []
-        # Registry access is kept in async setup; state aggregation reads the
-        # same resolved source ordering supplied by the entity registry.
+        # State aggregation uses the same ordering as get_entity_ids().
         return self._registry.get_entity_sources(self.system_id, entity_key)
 
     def _get_capacity_by_device(self) -> dict[str, float]:
         """Read installed capacity for every inverter, in its native Wh value."""
-        if self._hass is None:
+        if self._hass is None or self._registry is None:
             return {}
         if (
             self._registry.get_entity_status(
