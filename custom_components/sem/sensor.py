@@ -489,6 +489,14 @@ class SemSystemSensor(SemEntityProxyMixin, SensorEntity):
         )
 
     @property
+    def available(self) -> bool:
+        """Require the adapter to declare this sensor as readable."""
+        return (
+            self._manager.is_entity_readable(self._entity_key)
+            and super().available
+        )
+
+    @property
     def native_value(self):
         """Return the normalized plant-level value."""
         return self._manager.get_sensor_value(
