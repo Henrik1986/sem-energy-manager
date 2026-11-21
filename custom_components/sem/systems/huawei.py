@@ -15,11 +15,11 @@ from homeassistant.exceptions import HomeAssistantError
 
 from .adapter import SemSystemAdapter
 from .entity_resolver import EntityRegistryMatch, find_registry_entities
-from .huawei_aggregation import (
+from .aggregation import (
     capacity_weighted_soc,
     common_sem_options,
     common_number_metadata,
-    group_sources_by_inverter,
+    group_sources_by_owner,
     plant_meter_value,
     parse_numeric,
     sum_numeric_values,
@@ -188,7 +188,7 @@ def get_huawei_inverter_groups(
             HUAWEI_SYSTEM_ID,
             entity_key,
         )
-        for inverter_device_id, grouped_sources in group_sources_by_inverter(
+        for inverter_device_id, grouped_sources in group_sources_by_owner(
             sources
         ).items():
             for source in grouped_sources:
