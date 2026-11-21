@@ -65,6 +65,13 @@ class SemSystemManager:
             return []
         return self.registry.get_entity_ids(adapter.system_id, entity_key)
 
+    def get_related_entity_ids(self, entity_key: str) -> list[str]:
+        """Return auxiliary source IDs used to derive a SEM entity state."""
+        adapter = self.active_adapter
+        if adapter is None:
+            return []
+        return adapter.get_related_entity_ids(entity_key)
+
     def get_entity_id(self, entity_key: str) -> str | None:
         """Return the first source entity ID for backwards compatibility."""
         entity_ids = self.get_entity_ids(entity_key)
@@ -195,6 +202,24 @@ class SemSystemManager:
         if adapter is None:
             return {}
         return adapter.get_runtime_diagnostics(self.hass, self.registry)
+
+    async def async_after_select_option(
+        self,
+        entity_key: str,
+        sem_option: str,
+    ) -> None:
+        """Apply any adapter-specific action required by a SEM select."""
+        adapter = self.active_adapter
+        if adapter is None:
+            raise HomeAssistantError(
+                "No unambiguous SEM energy-system adapter is active"
+            )
+        await adapter.async_after_select_option(
+            self.hass,
+            self.registry,
+            entity_key,
+            sem_option,
+        )
 
     async def async_execute(
         self,
