@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -32,6 +33,30 @@ SOLAX_MANUFACTURER = "SolaX Power"
 # product-line plugins are added only after their read contract is verified.
 SUPPORTED_PLUGINS = frozenset({"solax"})
 
+SOLAX_WORKING_MODE_SOURCE_KEY = "charger_use_mode"
+SOLAX_NIGHT_CHARGE_SWITCH_SOURCE_KEY = "selfuse_night_charge_enable"
+SOLAX_NIGHT_CHARGE_ENTITY_KEY = "battery_night_charge_enable"
+SOLAX_TOU_PERIOD2_SWITCH_SOURCE_KEY = "charge_and_discharge_period2_enable"
+SOLAX_TOU_PERIOD2_ENTITY_KEY = "battery_tou_period2_enable"
+
+# SEM registry key -> SolaX Modbus time entity unique-ID suffix.
+SOLAX_TOU_TIME_ENTITY_MAP = {
+    "battery_tou_charge_start_1": "charge_start_1",
+    "battery_tou_charge_end_1": "charge_end_1",
+    "battery_tou_charge_start_2": "charge_start_2",
+    "battery_tou_charge_end_2": "charge_end_2",
+    "battery_tou_discharge_start_1": "discharge_start_1",
+    "battery_tou_discharge_end_1": "discharge_end_1",
+    "battery_tou_discharge_start_2": "discharge_start_2",
+    "battery_tou_discharge_end_2": "discharge_end_2",
+}
+
+SOLAX_TOU_OPTIONAL_ENTITIES = (
+    SOLAX_NIGHT_CHARGE_ENTITY_KEY,
+    SOLAX_TOU_PERIOD2_ENTITY_KEY,
+    *SOLAX_TOU_TIME_ENTITY_MAP,
+)
+
 SOLAX_REQUIRED_ENTITIES = (
     "battery_working_mode",
     "battery_state_of_capacity",
@@ -44,6 +69,7 @@ SOLAX_OPTIONAL_ENTITIES = (
     "battery_day_charge",
     "battery_day_discharge",
     "inverter_input_power",
+    *SOLAX_TOU_OPTIONAL_ENTITIES,
 )
 
 # SEM key -> (HA domain, SolaX entity key, source scope).
@@ -96,9 +122,12 @@ SOLAX_GEN5_BATTERY_KEYS = frozenset(
 )
 SOLAX_GEN5_MODEL_MARKERS = ("IES", "ULTRA", "VAST")
 
-SOLAX_WORKING_MODE_SOURCE_KEY = "charger_use_mode"
-SOLAX_NIGHT_CHARGE_SWITCH_SOURCE_KEY = "selfuse_night_charge_enable"
-SOLAX_NIGHT_CHARGE_ENTITY_KEY = "battery_night_charge_enable"
+SOLAX_GEN6_MODEL_MARKERS = ("VAST", "G4PRO")
+SOLAX_TOU_PERIOD_PATTERN = re.compile(
+    r"(?P<start>[01]\d|2[0-3]):[0-5]\d-"
+    r"(?P<end>[01]\d|2[0-3]):[0-5]\d/"
+    r"(?P<days>[1-7]{7})/(?P<flag>[+-])"
+)
 
 SOLAX_GEN2_MODE_OPTIONS = frozenset(
     {"Self Use Mode", "Force Time Use", "Back Up Mode"}
@@ -134,6 +163,79 @@ def _detect_generation(options: Sequence[str]) -> str | None:
     ):
         return "gen4_plus"
     return None
+
+
+def _parse_solax_tou_periods(
+    value: str,
+) -> dict[str, list[tuple[str, str]]]:
+    """Validate SEM periods and split charge/discharge windows for SolaX."""
+    if not isinstance(value, str) or not value.strip():
+        raise HomeAssistantError("The SolaX TOU periods value is empty")
+
+    result: dict[str, list[tuple[str, str]]] = {
+        "charge": [],
+        "discharge": [],
+    }
+
+    for line_number, raw_line in enumerate(value.strip().splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+
+        match = SOLAX_TOU_PERIOD_PATTERN.fullmatch(line)
+        if match is None:
+            raise HomeAssistantError(
+                f"Invalid SolaX TOU period on line {line_number}: {line!r}. "
+                "Expected HH:MM-HH:MM/1234567/+ or /-."
+            )
+
+        days = match.group("days")
+        if len(days) != 7 or set(days) != set("1234567"):
+            raise HomeAssistantError(
+                "SolaX TOU supports all seven days only; use 1234567."
+            )
+
+        start = match.group("start")
+        end = match.group("end")
+        start_hour, start_minute = (int(part) for part in start.split(":"))
+        end_hour, end_minute = (int(part) for part in end.split(":"))
+        start_minutes = start_hour * 60 + start_minute
+        end_minutes = end_hour * 60 + end_minute
+        if start_minutes >= end_minutes:
+            raise HomeAssistantError(
+                f"Invalid SolaX TOU period {start}-{end}: "
+                "periods must start before they end within the same day."
+            )
+
+        target = "charge" if match.group("flag") == "+" else "discharge"
+        result[target].append((start, end))
+        if len(result[target]) > 2:
+            raise HomeAssistantError(
+                f"SolaX supports at most two {target} periods."
+            )
+
+    if not result["charge"] and not result["discharge"]:
+        raise HomeAssistantError("No valid SolaX TOU periods were supplied")
+
+    all_windows = sorted(
+        (
+            (
+                int(start[:2]) * 60 + int(start[3:]),
+                int(end[:2]) * 60 + int(end[3:]),
+                kind,
+            )
+            for kind, windows in result.items()
+            for start, end in windows
+        ),
+        key=lambda item: item[0],
+    )
+    for previous, current in zip(all_windows, all_windows[1:]):
+        if current[0] < previous[1]:
+            raise HomeAssistantError(
+                "SolaX TOU charge and discharge periods must not overlap."
+            )
+
+    return result
 
 
 def _entry_plugin(entry: Any) -> str:
@@ -596,6 +698,38 @@ class SolaXAdapter(SemSystemAdapter):
             expected_device_ids=battery_device_ids,
         )
 
+        period2_matches = [
+            entry
+            for entry in entity_entries
+            if entry.domain == "switch"
+            and _entity_key_matches(
+                entry.unique_id,
+                SOLAX_TOU_PERIOD2_SWITCH_SOURCE_KEY,
+            )
+        ]
+        _resolve_expected_sources(
+            registry,
+            device_registry,
+            entity_key=SOLAX_TOU_PERIOD2_ENTITY_KEY,
+            matches=period2_matches,
+            expected_device_ids=battery_device_ids,
+        )
+
+        for registry_key, source_key in SOLAX_TOU_TIME_ENTITY_MAP.items():
+            time_matches = [
+                entry
+                for entry in entity_entries
+                if entry.domain == "time"
+                and _entity_key_matches(entry.unique_id, source_key)
+            ]
+            _resolve_expected_sources(
+                registry,
+                device_registry,
+                entity_key=registry_key,
+                matches=time_matches,
+                expected_device_ids=battery_device_ids,
+            )
+
         for entity_key, (domain, source_key, scope) in SOLAX_ENTITY_MAP.items():
             matches = [
                 entry
@@ -672,7 +806,7 @@ class SolaXAdapter(SemSystemAdapter):
                 "write.maximum_discharging_power": "not_supported",
                 "write.end_of_discharge_soc": "not_implemented",
                 "write.grid_export_power_limit": "not_implemented",
-                "write.time_of_use": "not_implemented",
+                "write.time_of_use": "gen4_5_only",
             }
         )
         return capabilities
@@ -746,6 +880,81 @@ class SolaXAdapter(SemSystemAdapter):
                 issues[device_id] = "disabled"
         return issues
 
+    def _is_gen4_or_gen5_device(
+        self,
+        source: EntitySource,
+        options: Sequence[str] | None = None,
+    ) -> bool:
+        """Accept only known Gen4/5 models, excluding Gen6 model families."""
+        if self._hass is None or source.device_id is None:
+            return False
+
+        if options is None:
+            state = self._hass.states.get(source.entity_id)
+            options = (
+                state.attributes.get("options", [])
+                if state is not None
+                else []
+            )
+
+        if _detect_generation(options) != "gen4_plus":
+            return False
+
+        device = dr.async_get(self._hass).async_get(source.device_id)
+        model = str(getattr(device, "model", "") or "").upper()
+        if not model or any(marker in model for marker in SOLAX_GEN6_MODEL_MARKERS):
+            return False
+        return True
+
+    def _require_sources_by_device(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        *,
+        entity_key: str,
+        domain: str,
+        device_ids: Sequence[str],
+    ) -> list[str]:
+        """Require one active, available source entity per inverter device."""
+        if registry.get_entity_status(self.system_id, entity_key) != "found":
+            raise HomeAssistantError(
+                f"SolaX entity {entity_key} is missing, disabled or ambiguous"
+            )
+
+        sources = registry.get_entity_sources(self.system_id, entity_key)
+        sources_by_device: dict[str, list[EntitySource]] = defaultdict(list)
+        for source in sources:
+            if source.device_id is None:
+                raise HomeAssistantError(
+                    f"SolaX entity {source.entity_id} has no inverter device"
+                )
+            sources_by_device[source.device_id].append(source)
+
+        if set(sources_by_device) != set(device_ids) or any(
+            len(sources_by_device[device_id]) != 1
+            for device_id in device_ids
+        ):
+            raise HomeAssistantError(
+                f"SolaX entity {entity_key} must resolve exactly once "
+                "for every battery inverter"
+            )
+
+        entity_ids = []
+        for device_id in device_ids:
+            entity_id = sources_by_device[device_id][0].entity_id
+            if not entity_id.startswith(f"{domain}."):
+                raise HomeAssistantError(
+                    f"Unexpected source domain for SolaX entity {entity_id}"
+                )
+            state = hass.states.get(entity_id)
+            if state is None or state.state in ("unknown", "unavailable"):
+                raise HomeAssistantError(
+                    f"SolaX entity {entity_id} is currently unavailable"
+                )
+            entity_ids.append(entity_id)
+
+        return entity_ids
+
     def get_sem_options(
         self,
         entity_key: str,
@@ -800,7 +1009,8 @@ class SolaXAdapter(SemSystemAdapter):
                 time_of_use_supported.append("Force Time Use" in options)
             else:
                 time_of_use_supported.append(
-                    source.device_id in night_charge_sources
+                    self._is_gen4_or_gen5_device(source, options)
+                    and source.device_id in night_charge_sources
                 )
 
         if time_of_use_supported and all(time_of_use_supported):
@@ -866,6 +1076,7 @@ class SolaXAdapter(SemSystemAdapter):
                     source_option = "Force Time Use"
                 elif (
                     generation == "gen4_plus"
+                    and self._is_gen4_or_gen5_device(source, options)
                     and source.device_id in night_charge_sources
                 ):
                     source_option = "Self Use Mode"
@@ -935,6 +1146,12 @@ class SolaXAdapter(SemSystemAdapter):
             if source_option == "Feedin Priority":
                 translated.append("feed_in_priority")
             elif source_option == "Self Use Mode":
+                if (
+                    not self._is_gen4_or_gen5_device(source)
+                    and source.device_id in all_night_charge_sources
+                ):
+                    translated.append(None)
+                    continue
                 if source.device_id in night_charge_issues:
                     translated.append(None)
                     continue
@@ -996,7 +1213,10 @@ class SolaXAdapter(SemSystemAdapter):
                 else []
             )
             generation = _detect_generation(options)
-            if generation != "gen4_plus":
+            if (
+                generation != "gen4_plus"
+                or not self._is_gen4_or_gen5_device(source, options)
+            ):
                 continue
 
             night_source = all_night_charge_sources.get(source.device_id)
@@ -1238,6 +1458,7 @@ class SolaXAdapter(SemSystemAdapter):
                 supported_modes.append("time_of_use")
             elif (
                 generation == "gen4_plus"
+                and self._is_gen4_or_gen5_device(source, options)
                 and source.device_id in enabled_night_charge_sources
             ):
                 supported_modes.append("time_of_use")
@@ -1316,7 +1537,150 @@ class SolaXAdapter(SemSystemAdapter):
         command: str,
         data: dict[str, Any],
     ) -> None:
-        """Keep all SolaX write operations disabled in the read-only phase."""
-        raise HomeAssistantError(
-            "SolaX write support is not enabled. No device setting was changed."
+        """Execute supported SolaX commands with generation-specific guards."""
+        if command != "set_battery_time_of_use_periods":
+            raise HomeAssistantError(
+                f"Unsupported SEM command for SolaX: {command}"
+            )
+        if "periods" not in data:
+            raise HomeAssistantError(
+                "Missing data for SEM command set_battery_time_of_use_periods"
+            )
+
+        periods = _parse_solax_tou_periods(data["periods"])
+        mode_sources = registry.get_entity_sources(
+            self.system_id,
+            "battery_working_mode",
         )
+        if (
+            registry.get_entity_status(
+                self.system_id,
+                "battery_working_mode",
+            ) != "found"
+            or not mode_sources
+        ):
+            raise HomeAssistantError(
+                "SolaX battery working-mode entities are not fully resolved"
+            )
+
+        device_ids = []
+        for source in mode_sources:
+            if source.device_id is None:
+                raise HomeAssistantError(
+                    f"SolaX working-mode entity {source.entity_id} "
+                    "has no inverter device"
+                )
+            if not self._is_gen4_or_gen5_device(source):
+                device = dr.async_get(hass).async_get(source.device_id)
+                model = getattr(device, "model", None)
+                raise HomeAssistantError(
+                    "The SEM TOU action is supported only on SolaX Gen4/Gen5. "
+                    f"Device {model or source.entity_id} is not a verified "
+                    "Gen4/Gen5 model."
+                )
+            device_ids.append(source.device_id)
+
+        if len(set(device_ids)) != len(device_ids):
+            raise HomeAssistantError(
+                "SolaX working-mode sources contain duplicate inverter devices"
+            )
+        device_ids = sorted(device_ids)
+
+        # Require every related entity on every supported battery inverter.
+        night_charge_ids = self._require_sources_by_device(
+            hass,
+            registry,
+            entity_key=SOLAX_NIGHT_CHARGE_ENTITY_KEY,
+            domain="switch",
+            device_ids=device_ids,
+        )
+        period2_ids = self._require_sources_by_device(
+            hass,
+            registry,
+            entity_key=SOLAX_TOU_PERIOD2_ENTITY_KEY,
+            domain="switch",
+            device_ids=device_ids,
+        )
+        time_entity_ids = {
+            source_key: self._require_sources_by_device(
+                hass,
+                registry,
+                entity_key=registry_key,
+                domain="time",
+                device_ids=device_ids,
+            )
+            for registry_key, source_key in SOLAX_TOU_TIME_ENTITY_MAP.items()
+        }
+
+        charge_periods = periods["charge"]
+        discharge_periods = periods["discharge"]
+        period2_required = (
+            len(charge_periods) > 1 or len(discharge_periods) > 1
+        )
+
+        # SolaX defaults the normal self-use discharge window to all day.
+        # Keep that behaviour when SEM supplies no explicit discharge periods.
+        if discharge_periods:
+            discharge_slots = list(discharge_periods)
+        else:
+            discharge_slots = [("00:00", "23:59")]
+        charge_slots = list(charge_periods)
+
+        disabled_window = ("00:00", "00:00")
+        while len(charge_slots) < 2:
+            charge_slots.append(disabled_window)
+        while len(discharge_slots) < 2:
+            discharge_slots.append(disabled_window)
+
+        time_values = {
+            "battery_tou_charge_start_1": charge_slots[0][0],
+            "battery_tou_charge_end_1": charge_slots[0][1],
+            "battery_tou_charge_start_2": charge_slots[1][0],
+            "battery_tou_charge_end_2": charge_slots[1][1],
+            "battery_tou_discharge_start_1": discharge_slots[0][0],
+            "battery_tou_discharge_end_1": discharge_slots[0][1],
+            "battery_tou_discharge_start_2": discharge_slots[1][0],
+            "battery_tou_discharge_end_2": discharge_slots[1][1],
+        }
+
+        # Disable grid charging and Period 2 while all time registers are updated.
+        await hass.services.async_call(
+            "switch",
+            "turn_off",
+            {"entity_id": night_charge_ids},
+            blocking=True,
+        )
+        await hass.services.async_call(
+            "switch",
+            "turn_off",
+            {"entity_id": period2_ids},
+            blocking=True,
+        )
+
+        for registry_key, value in time_values.items():
+            await hass.services.async_call(
+                "time",
+                "set_value",
+                {
+                    "entity_id": time_entity_ids[registry_key],
+                    "time": f"{value}:00",
+                },
+                blocking=True,
+            )
+
+        if period2_required:
+            await hass.services.async_call(
+                "switch",
+                "turn_on",
+                {"entity_id": period2_ids},
+                blocking=True,
+            )
+
+        # Enable grid charging only after the charge time windows are written.
+        if charge_periods:
+            await hass.services.async_call(
+                "switch",
+                "turn_on",
+                {"entity_id": night_charge_ids},
+                blocking=True,
+            )
