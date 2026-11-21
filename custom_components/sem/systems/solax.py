@@ -785,7 +785,7 @@ class SolaXAdapter(SemSystemAdapter):
 
     @staticmethod
     def _build_capabilities(registry: SemEntityRegistry) -> dict[str, str]:
-        """Describe read availability separately from unimplemented write features."""
+        """Describe read availability and generation-specific write support."""
         capabilities = {
             f"read.{entity_key}": (
                 registry.get_entity_status(SOLAX_SYSTEM_ID, entity_key)
@@ -898,7 +898,7 @@ class SolaXAdapter(SemSystemAdapter):
         source: EntitySource,
         options: Sequence[str] | None = None,
     ) -> bool:
-        """Accept only known Gen4/5 models, excluding Gen6 model families."""
+        """Accept only explicitly recognized SolaX Gen4 and Gen5 model families."""
         if self._hass is None or source.device_id is None:
             return False
 
@@ -1357,7 +1357,7 @@ class SolaXAdapter(SemSystemAdapter):
         hass: HomeAssistant,
         registry: SemEntityRegistry,
     ) -> dict[str, Any]:
-        """Report unsafe SOC aggregation or conflicting plant-meter readings."""
+        """Report unsafe aggregation, meter conflicts and working-mode support."""
         errors = []
 
         soc_sources = registry.get_entity_sources(
