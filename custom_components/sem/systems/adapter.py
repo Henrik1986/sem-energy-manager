@@ -8,6 +8,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant, State
 
+from .capabilities import SystemCapabilities
 from .registry import SemEntityRegistry
 
 
@@ -16,6 +17,11 @@ class SemSystemAdapter(ABC):
 
     system_id: str
     integration_domain: str
+
+    @property
+    def capabilities(self) -> SystemCapabilities:
+        """Return the entities and commands supported by this adapter."""
+        return SystemCapabilities()
 
     @abstractmethod
     async def async_setup(
