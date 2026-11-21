@@ -223,11 +223,32 @@ class SemSystemManager:
         return adapter.to_sem_option(entity_key, source_options)
 
     def get_runtime_diagnostics(self) -> dict[str, Any]:
-        """Return live adapter warnings for the SEM status sensor."""
+        """Return provider-specific diagnostic data for the SEM status sensor."""
         adapter = self.active_adapter
         if adapter is None:
             return {}
         return adapter.get_runtime_diagnostics(self.hass, self.registry)
+
+    def get_setup_errors(self) -> list[dict[str, Any]]:
+        """Return actionable setup errors from the active adapter."""
+        adapter = self.active_adapter
+        if adapter is None:
+            return []
+        return adapter.get_setup_errors(self.hass, self.registry)
+
+    def get_runtime_errors(
+        self,
+        diagnostics: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Return actionable runtime errors from the active adapter."""
+        adapter = self.active_adapter
+        if adapter is None:
+            return []
+        return adapter.get_runtime_errors(
+            self.hass,
+            self.registry,
+            diagnostics,
+        )
 
     async def async_execute(
         self,
