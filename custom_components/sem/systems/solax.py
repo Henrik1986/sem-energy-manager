@@ -122,7 +122,20 @@ SOLAX_GEN5_BATTERY_KEYS = frozenset(
 )
 SOLAX_GEN5_MODEL_MARKERS = ("IES", "ULTRA", "VAST")
 
-SOLAX_GEN6_MODEL_MARKERS = ("VAST", "G4PRO")
+SOLAX_GEN4_MODEL_PREFIXES = (
+    "X1-HYBRID-",
+    "X3-HYBRID-",
+    "X1-RETROFIT",
+    "X3-RETROFIT",
+    "X1-TIGO",
+    "X3-TIGO",
+)
+SOLAX_GEN5_MODEL_PREFIXES = (
+    "X1-IES-",
+    "X3-IES-",
+    "X3-ULTRA-",
+    "X3-AELIO",
+)
 SOLAX_TOU_PERIOD_PATTERN = re.compile(
     r"(?P<start>(?:[01]\d|2[0-3]):[0-5]\d)-"
     r"(?P<end>(?:[01]\d|2[0-3]):[0-5]\d)/"
@@ -902,9 +915,9 @@ class SolaXAdapter(SemSystemAdapter):
 
         device = dr.async_get(self._hass).async_get(source.device_id)
         model = str(getattr(device, "model", "") or "").upper()
-        if not model or any(marker in model for marker in SOLAX_GEN6_MODEL_MARKERS):
-            return False
-        return True
+        return model.startswith(
+            SOLAX_GEN4_MODEL_PREFIXES + SOLAX_GEN5_MODEL_PREFIXES
+        )
 
     def _require_sources_by_device(
         self,
