@@ -28,9 +28,9 @@ SOLAX_DOMAIN = "solax_modbus"
 SOLAX_SYSTEM_ID = "solax"
 SOLAX_MANUFACTURER = "SolaX Power"
 
-# The standard plugin covers the supported Gen2-6 product family. The LV
-# plugin uses the same read entity keys and is included as a compatible profile.
-SUPPORTED_PLUGINS = frozenset({"solax", "solax_lv"})
+# The standard plugin covers the Gen2-6 product family. Dedicated
+# product-line plugins are added only after their read contract is verified.
+SUPPORTED_PLUGINS = frozenset({"solax"})
 
 SOLAX_REQUIRED_ENTITIES = (
     "battery_state_of_capacity",
