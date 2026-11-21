@@ -33,6 +33,7 @@ SOLAX_MANUFACTURER = "SolaX Power"
 SUPPORTED_PLUGINS = frozenset({"solax"})
 
 SOLAX_REQUIRED_ENTITIES = (
+    "battery_working_mode",
     "battery_state_of_capacity",
     "battery_charge_discharge_power",
     "power_meter_active_power",
@@ -94,6 +95,45 @@ SOLAX_GEN5_BATTERY_KEYS = frozenset(
     }
 )
 SOLAX_GEN5_MODEL_MARKERS = ("IES", "ULTRA", "VAST")
+
+SOLAX_WORKING_MODE_SOURCE_KEY = "charger_use_mode"
+SOLAX_NIGHT_CHARGE_SWITCH_SOURCE_KEY = "selfuse_night_charge_enable"
+SOLAX_NIGHT_CHARGE_ENTITY_KEY = "battery_night_charge_enable"
+
+SOLAX_GEN2_MODE_OPTIONS = frozenset(
+    {"Self Use Mode", "Force Time Use", "Back Up Mode"}
+)
+SOLAX_GEN3_MODE_OPTIONS = frozenset(
+    {"Self Use Mode", "Force Time Use", "Back Up Mode", "Feedin Priority"}
+)
+SOLAX_GEN4_PLUS_MODE_OPTIONS = frozenset(
+    {
+        "Self Use Mode",
+        "Feedin Priority",
+        "Back Up Mode",
+        "Manual Mode",
+        "PeakShaving",
+        "Smart Schedule",
+    }
+)
+
+
+def _detect_generation(options: Sequence[str]) -> str | None:
+    """Detect the SolaX generation family from its published mode options."""
+    option_set = set(options)
+    if SOLAX_GEN2_MODE_OPTIONS.issubset(option_set) and (
+        "Feedin Priority" not in option_set
+    ):
+        return "gen2"
+    if SOLAX_GEN3_MODE_OPTIONS.issubset(option_set) and (
+        "Manual Mode" not in option_set
+    ):
+        return "gen3"
+    if SOLAX_GEN4_PLUS_MODE_OPTIONS.issubset(option_set) and (
+        "Force Time Use" not in option_set
+    ):
+        return "gen4_plus"
+    return None
 
 
 def _entry_plugin(entry: Any) -> str:
@@ -522,6 +562,40 @@ class SolaXAdapter(SemSystemAdapter):
             expected_device_ids=soc_expected_ids,
         )
 
+        mode_matches = [
+            entry
+            for entry in entity_entries
+            if entry.domain == "select"
+            and _entity_key_matches(
+                entry.unique_id,
+                SOLAX_WORKING_MODE_SOURCE_KEY,
+            )
+        ]
+        _resolve_expected_sources(
+            registry,
+            device_registry,
+            entity_key="battery_working_mode",
+            matches=mode_matches,
+            expected_device_ids=battery_device_ids,
+        )
+
+        night_charge_matches = [
+            entry
+            for entry in entity_entries
+            if entry.domain == "switch"
+            and _entity_key_matches(
+                entry.unique_id,
+                SOLAX_NIGHT_CHARGE_SWITCH_SOURCE_KEY,
+            )
+        ]
+        _resolve_expected_sources(
+            registry,
+            device_registry,
+            entity_key=SOLAX_NIGHT_CHARGE_ENTITY_KEY,
+            matches=night_charge_matches,
+            expected_device_ids=battery_device_ids,
+        )
+
         for entity_key, (domain, source_key, scope) in SOLAX_ENTITY_MAP.items():
             matches = [
                 entry
@@ -580,10 +654,20 @@ class SolaXAdapter(SemSystemAdapter):
                 "power_meter_active_power",
             )
         }
+        capabilities["read.battery_working_mode"] = (
+            registry.get_entity_status(SOLAX_SYSTEM_ID, "battery_working_mode")
+            or "not_configured"
+        )
         capabilities.update(
             {
-                "read.battery_working_mode": "not_implemented",
-                "write.battery_working_mode": "not_implemented",
+                "write.battery_working_mode": (
+                    "implemented"
+                    if registry.get_entity_status(
+                        SOLAX_SYSTEM_ID,
+                        "battery_working_mode",
+                    ) == "found"
+                    else "not_configured"
+                ),
                 "write.grid_charge_maximum_power": "not_supported",
                 "write.maximum_discharging_power": "not_supported",
                 "write.end_of_discharge_soc": "not_implemented",
@@ -592,6 +676,279 @@ class SolaXAdapter(SemSystemAdapter):
             }
         )
         return capabilities
+
+    def get_related_entity_ids(self, entity_key: str) -> list[str]:
+        """Return auxiliary entities that affect a SEM entity's state."""
+        if entity_key != "battery_working_mode" or self._registry is None:
+            return []
+        return self._registry.get_entity_ids(
+            self.system_id,
+            SOLAX_NIGHT_CHARGE_ENTITY_KEY,
+        )
+
+    def _night_charge_sources_by_device(
+        self,
+        *,
+        enabled_only: bool = False,
+    ) -> dict[str, EntitySource]:
+        """Return at most one night-charge switch per inverter device."""
+        if self._hass is None:
+            return {}
+
+        entity_registry = er.async_get(self._hass)
+        candidates: dict[str, list[EntitySource]] = defaultdict(list)
+        for source in self._get_sources(SOLAX_NIGHT_CHARGE_ENTITY_KEY):
+            if source.device_id is None:
+                continue
+            entity_entry = entity_registry.async_get(source.entity_id)
+            if entity_entry is None:
+                continue
+            if enabled_only and _disabled_by(entity_entry) is not None:
+                continue
+            candidates[source.device_id].append(source)
+
+        return {
+            device_id: sources[0]
+            for device_id, sources in candidates.items()
+            if len(sources) == 1
+        }
+
+    def _mode_generation(self, source: EntitySource) -> str | None:
+        """Detect the generation family from the source select's options."""
+        if self._hass is None:
+            return None
+        state = self._hass.states.get(source.entity_id)
+        if state is None:
+            return None
+        options = state.attributes.get("options", [])
+        if not isinstance(options, (list, tuple)):
+            return None
+        return _detect_generation(options)
+
+    def get_sem_options(
+        self,
+        entity_key: str,
+        source_options: Sequence[Sequence[str]],
+    ) -> list[str]:
+        """Expose SEM modes that every detected SolaX device can implement."""
+        if entity_key != "battery_working_mode":
+            return super().get_sem_options(entity_key, source_options)
+
+        sources = self._get_sources(entity_key)
+        if not sources or len(sources) != len(source_options):
+            return []
+
+        generations = [_detect_generation(options) for options in source_options]
+        if any(generation is None for generation in generations):
+            return []
+
+        sem_options = []
+        if all("Self Use Mode" in options for options in source_options):
+            sem_options.append("self_consumption")
+
+        if all("Feedin Priority" in options for options in source_options):
+            sem_options.append("feed_in_priority")
+
+        night_charge_sources = self._night_charge_sources_by_device(
+            enabled_only=True
+        )
+        time_of_use_supported = []
+        for source, options, generation in zip(
+            sources,
+            source_options,
+            generations,
+        ):
+            if generation in {"gen2", "gen3"}:
+                time_of_use_supported.append("Force Time Use" in options)
+            else:
+                time_of_use_supported.append(
+                    source.device_id in night_charge_sources
+                )
+
+        if time_of_use_supported and all(time_of_use_supported):
+            sem_options.append("time_of_use")
+
+        return sem_options
+
+    def to_source_options(
+        self,
+        entity_key: str,
+        sem_option: str,
+        source_options: Sequence[Sequence[str]],
+    ) -> list[str]:
+        """Translate a SEM working mode for each SolaX generation."""
+        if entity_key != "battery_working_mode":
+            return super().to_source_options(
+                entity_key,
+                sem_option,
+                source_options,
+            )
+
+        sources = self._get_sources(entity_key)
+        if not sources or len(sources) != len(source_options):
+            raise ValueError("No complete set of SolaX working-mode sources found")
+
+        night_charge_sources = self._night_charge_sources_by_device(
+            enabled_only=True
+        )
+        translated = []
+        for source, options in zip(sources, source_options):
+            generation = _detect_generation(options)
+            if generation is None:
+                raise ValueError(
+                    f"Could not identify SolaX generation for {source.entity_id}"
+                )
+
+            if sem_option == "self_consumption":
+                source_option = "Self Use Mode"
+            elif sem_option == "feed_in_priority":
+                source_option = "Feedin Priority"
+            elif sem_option == "time_of_use":
+                if generation in {"gen2", "gen3"}:
+                    source_option = "Force Time Use"
+                elif (
+                    generation == "gen4_plus"
+                    and source.device_id in night_charge_sources
+                ):
+                    source_option = "Self Use Mode"
+                else:
+                    raise ValueError(
+                        "SolaX time_of_use is not available for every device. "
+                        "Gen4+ requires an enabled Selfuse Night Charge switch."
+                    )
+            else:
+                raise ValueError(
+                    f"Unsupported SEM battery working mode: {sem_option}"
+                )
+
+            if source_option not in options:
+                raise ValueError(
+                    f"SolaX mode {source_option!r} is not supported by "
+                    f"{source.entity_id}"
+                )
+            translated.append(source_option)
+
+        return translated
+
+    def to_sem_option(
+        self,
+        entity_key: str,
+        source_options: Sequence[str | None],
+    ) -> str | None:
+        """Translate physical SolaX modes back to the SEM mode."""
+        if entity_key != "battery_working_mode":
+            return super().to_sem_option(entity_key, source_options)
+
+        sources = self._get_sources(entity_key)
+        if not sources or len(sources) != len(source_options):
+            return None
+
+        all_night_charge_sources = self._night_charge_sources_by_device()
+        enabled_night_charge_sources = self._night_charge_sources_by_device(
+            enabled_only=True
+        )
+        translated = []
+
+        for source, source_option in zip(sources, source_options):
+            generation = self._mode_generation(source)
+            if generation is None or source_option is None:
+                translated.append(None)
+                continue
+
+            if generation in {"gen2", "gen3"}:
+                mode_map = {
+                    "Self Use Mode": "self_consumption",
+                    "Force Time Use": "time_of_use",
+                    "Feedin Priority": "feed_in_priority",
+                }
+                translated.append(mode_map.get(source_option))
+                continue
+
+            if source_option == "Feedin Priority":
+                translated.append("feed_in_priority")
+            elif source_option == "Self Use Mode":
+                if self._hass is None or source.device_id is None:
+                    translated.append(None)
+                    continue
+
+                night_source = all_night_charge_sources.get(
+                    source.device_id
+                )
+                enabled_source = enabled_night_charge_sources.get(
+                    source.device_id
+                )
+                if night_source is None:
+                    # No corresponding switch is exposed by the integration:
+                    # this device cannot be represented as SEM time_of_use.
+                    translated.append("self_consumption")
+                elif enabled_source is None:
+                    # The switch exists but is disabled in the entity registry.
+                    translated.append(None)
+                else:
+                    switch_state = self._hass.states.get(
+                        enabled_source.entity_id
+                    )
+                    if switch_state is None:
+                        translated.append(None)
+                    elif switch_state.state == "on":
+                        translated.append("time_of_use")
+                    elif switch_state.state == "off":
+                        translated.append("self_consumption")
+                    else:
+                        translated.append(None)
+            else:
+                translated.append(None)
+
+        return super().to_sem_option(entity_key, translated)
+
+    async def async_after_select_option(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        entity_key: str,
+        sem_option: str,
+    ) -> None:
+        """Toggle Gen4/5 night charging after changing the SEM working mode."""
+        if entity_key != "battery_working_mode":
+            return
+
+        night_charge_sources = self._night_charge_sources_by_device(
+            enabled_only=True
+        )
+        all_night_charge_sources = self._night_charge_sources_by_device()
+        for source in self._get_sources(entity_key):
+            state = hass.states.get(source.entity_id)
+            options = (
+                state.attributes.get("options", [])
+                if state is not None
+                else []
+            )
+            generation = _detect_generation(options)
+            if generation != "gen4_plus":
+                continue
+
+            night_source = all_night_charge_sources.get(source.device_id)
+            enabled_source = night_charge_sources.get(source.device_id)
+            if enabled_source is None:
+                if sem_option == "time_of_use":
+                    raise HomeAssistantError(
+                        "SolaX time_of_use requires an enabled "
+                        "Selfuse Night Charge switch on every Gen4/5 device."
+                    )
+                if night_source is not None:
+                    raise HomeAssistantError(
+                        "The SolaX Selfuse Night Charge switch is disabled. "
+                        "Enable it before changing the working mode."
+                    )
+                continue
+
+            service = "turn_on" if sem_option == "time_of_use" else "turn_off"
+            await hass.services.async_call(
+                "switch",
+                service,
+                {"entity_id": enabled_source.entity_id},
+                blocking=True,
+            )
 
     def get_sensor_value(
         self,
@@ -777,7 +1134,65 @@ class SolaXAdapter(SemSystemAdapter):
                     }
                 )
 
-        return {"errors": errors} if errors else {}
+        working_mode_generations = []
+        all_night_charge_sources = self._night_charge_sources_by_device()
+        enabled_night_charge_sources = self._night_charge_sources_by_device(
+            enabled_only=True
+        )
+        for source in registry.get_entity_sources(
+            self.system_id,
+            "battery_working_mode",
+        ):
+            state = hass.states.get(source.entity_id)
+            options = (
+                state.attributes.get("options", [])
+                if state is not None
+                else []
+            )
+            generation = _detect_generation(options)
+            supported_modes = []
+            if "Self Use Mode" in options:
+                supported_modes.append("self_consumption")
+            if "Feedin Priority" in options:
+                supported_modes.append("feed_in_priority")
+            if generation in {"gen2", "gen3"} and "Force Time Use" in options:
+                supported_modes.append("time_of_use")
+            elif (
+                generation == "gen4_plus"
+                and source.device_id in enabled_night_charge_sources
+            ):
+                supported_modes.append("time_of_use")
+
+            device = (
+                dr.async_get(hass).async_get(source.device_id)
+                if source.device_id is not None
+                else None
+            )
+            working_mode_generations.append(
+                {
+                    "device_id": source.device_id,
+                    "entity_id": source.entity_id,
+                    "model": getattr(device, "model", None),
+                    "generation": generation or "unknown",
+                    "supported_sem_modes": supported_modes,
+                    "night_charge_switch": (
+                        enabled_night_charge_sources[source.device_id].entity_id
+                        if source.device_id in enabled_night_charge_sources
+                        else None
+                    ),
+                    "night_charge_switch_disabled": (
+                        source.device_id in all_night_charge_sources
+                        and source.device_id not in enabled_night_charge_sources
+                    ),
+                }
+            )
+
+        diagnostics = {}
+        if errors:
+            diagnostics["errors"] = errors
+        if working_mode_generations:
+            diagnostics["working_mode_generations"] = working_mode_generations
+        return diagnostics
 
     def _get_sources(self, entity_key: str) -> list[EntitySource]:
         """Return resolved sources for one SEM key."""
