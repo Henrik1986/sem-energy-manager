@@ -734,6 +734,15 @@ class SolaXAdapter(SemSystemAdapter):
         if entity_key != "battery_working_mode":
             return super().get_sem_options(entity_key, source_options)
 
+        if (
+            self._registry is None
+            or self._registry.get_entity_status(
+                self.system_id,
+                entity_key,
+            ) != "found"
+        ):
+            return []
+
         sources = self._get_sources(entity_key)
         if not sources or len(sources) != len(source_options):
             return []
@@ -782,6 +791,17 @@ class SolaXAdapter(SemSystemAdapter):
                 entity_key,
                 sem_option,
                 source_options,
+            )
+
+        if (
+            self._registry is None
+            or self._registry.get_entity_status(
+                self.system_id,
+                entity_key,
+            ) != "found"
+        ):
+            raise ValueError(
+                "SolaX working-mode source is missing, duplicated or ambiguous"
             )
 
         sources = self._get_sources(entity_key)
@@ -838,6 +858,15 @@ class SolaXAdapter(SemSystemAdapter):
         """Translate physical SolaX modes back to the SEM mode."""
         if entity_key != "battery_working_mode":
             return super().to_sem_option(entity_key, source_options)
+
+        if (
+            self._registry is None
+            or self._registry.get_entity_status(
+                self.system_id,
+                entity_key,
+            ) != "found"
+        ):
+            return None
 
         sources = self._get_sources(entity_key)
         if not sources or len(sources) != len(source_options):
@@ -916,6 +945,7 @@ class SolaXAdapter(SemSystemAdapter):
             enabled_only=True
         )
         all_night_charge_sources = self._night_charge_sources_by_device()
+        switch_entity_ids = []
         for source in self._get_sources(entity_key):
             state = hass.states.get(source.entity_id)
             options = (
@@ -942,11 +972,18 @@ class SolaXAdapter(SemSystemAdapter):
                     )
                 continue
 
-            service = "turn_on" if sem_option == "time_of_use" else "turn_off"
+            switch_entity_ids.append(enabled_source.entity_id)
+
+        if switch_entity_ids:
+            service = (
+                "turn_on"
+                if sem_option == "time_of_use"
+                else "turn_off"
+            )
             await hass.services.async_call(
                 "switch",
                 service,
-                {"entity_id": enabled_source.entity_id},
+                {"entity_id": sorted(set(switch_entity_ids))},
                 blocking=True,
             )
 
