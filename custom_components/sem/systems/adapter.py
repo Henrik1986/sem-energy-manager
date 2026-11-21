@@ -167,6 +167,19 @@ class SemSystemAdapter(ABC):
         first = source_options[0]
         return first if all(option == first for option in source_options) else None
 
+    def get_related_entity_ids(self, entity_key: str) -> list[str]:
+        """Return additional entities whose state affects a SEM entity."""
+        return []
+
+    async def async_after_select_option(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        entity_key: str,
+        sem_option: str,
+    ) -> None:
+        """Apply adapter-specific side effects after a SEM select changes."""
+
     def get_runtime_diagnostics(
         self,
         hass: HomeAssistant,
