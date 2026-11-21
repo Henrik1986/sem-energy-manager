@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
 
 from .adapter import SemSystemAdapter
+from .capabilities import EntityCapability, SystemCapabilities
 from .entity_resolver import EntityRegistryMatch, find_registry_entities
 from .aggregation import (
     capacity_weighted_soc,
@@ -109,6 +110,30 @@ BATTERY_SETTING_KEYS: Final[frozenset[str]] = frozenset({
     "maximum_discharging_power",
     "end_of_discharge_soc",
 })
+
+
+# Preserve the complete set of entities required by the current Huawei YAML
+# contract. Other adapters may mark non-core entities as optional.
+HUAWEI_CAPABILITIES: Final[SystemCapabilities] = SystemCapabilities(
+    entities={
+        key: EntityCapability(
+            required=True,
+            readable=True,
+            writable=key in (
+                "battery_working_mode",
+                "grid_charge_maximum_power",
+                "maximum_discharging_power",
+                "end_of_discharge_soc",
+            ),
+        )
+        for key in HUAWEI_ENTITY_MAP
+    },
+    commands=frozenset({
+        "set_battery_time_of_use_periods",
+        "set_grid_export_power_limit",
+        "reset_grid_export_power_limit",
+    }),
+)
 
 
 def _to_entity_sources(
@@ -328,7 +353,7 @@ def register_huawei_entities(
     sem_registry.register_system(
         HUAWEI_SYSTEM_ID,
         configured=True,
-        required_entities=list(HUAWEI_ENTITY_MAP),
+        capabilities=HUAWEI_CAPABILITIES,
     )
     resolved = resolve_huawei_entities(hass)
 
@@ -584,7 +609,7 @@ def mark_huawei_entities_missing(
     sem_registry.register_system(
         HUAWEI_SYSTEM_ID,
         configured=True,
-        required_entities=list(HUAWEI_ENTITY_MAP),
+        capabilities=HUAWEI_CAPABILITIES,
     )
     for function in HUAWEI_ENTITY_MAP:
         sem_registry.set_entity_result(
@@ -606,7 +631,6 @@ async def async_wait_for_huawei(
         ConfigEntryState.MIGRATION_ERROR,
         ConfigEntryState.FAILED_UNLOAD,
     }
-    required_entities = list(HUAWEI_ENTITY_MAP)
 
     for _ in range(120):
         if hass.is_stopping:
@@ -620,7 +644,7 @@ async def async_wait_for_huawei(
             sem_registry.register_system(
                 HUAWEI_SYSTEM_ID,
                 configured=False,
-                required_entities=required_entities,
+                capabilities=HUAWEI_CAPABILITIES,
             )
             _LOGGER.warning("Huawei resolver: No enabled Huawei Solar config entry found")
             return
@@ -650,6 +674,11 @@ class HuaweiSolarAdapter(SemSystemAdapter):
 
     system_id = HUAWEI_SYSTEM_ID
     integration_domain = HUAWEI_DOMAIN
+
+    @property
+    def capabilities(self) -> SystemCapabilities:
+        """Return the capabilities supported by Huawei Solar."""
+        return HUAWEI_CAPABILITIES
 
     _WORKING_MODE_MAP: Final[dict[str, str]] = {
         "maximise_self_consumption": "self_consumption",
