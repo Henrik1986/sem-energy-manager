@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Callable, Literal
 
+from .capabilities import SystemCapabilities
+
 
 EntityStatus = Literal[
     "pending",
@@ -52,10 +54,10 @@ class EntityResolution:
 
 @dataclass
 class SystemResolution:
-    """Resolution information for one energy system."""
+    """Resolution information and capabilities for one energy system."""
 
     configured: bool
-    required_entities: tuple[str, ...]
+    capabilities: SystemCapabilities
     entities: dict[str, EntityResolution] = field(default_factory=dict)
 
 
@@ -71,12 +73,12 @@ class SemEntityRegistry:
         system_id: str,
         *,
         configured: bool,
-        required_entities: list[str],
+        capabilities: SystemCapabilities,
     ) -> None:
-        """Register a system and its required entities."""
+        """Register a system and the capabilities it exposes."""
 
         previous = self._systems.get(system_id)
-        required = tuple(required_entities)
+        supported_entities = tuple(capabilities.entities)
 
         entities = {
             key: (
@@ -84,12 +86,12 @@ class SemEntityRegistry:
                 if previous and key in previous.entities
                 else EntityResolution()
             )
-            for key in required
+            for key in supported_entities
         }
 
         self._systems[system_id] = SystemResolution(
             configured=configured,
-            required_entities=required,
+            capabilities=capabilities,
             entities=entities if configured else {},
         )
 
@@ -116,7 +118,7 @@ class SemEntityRegistry:
 
         system = self._systems[system_id]
 
-        if entity_key not in system.required_entities:
+        if not system.capabilities.has_entity(entity_key):
             raise KeyError(
                 f"Unknown entity {entity_key} for system {system_id}"
             )
@@ -299,32 +301,38 @@ class SemEntityRegistry:
             return "FEL"
 
         for system in configured:
-            if not system.required_entities:
+            required_entities = system.capabilities.required_entity_keys
+            if not required_entities:
                 return "FEL"
 
             if any(
                 system.entities.get(key, EntityResolution()).status != "found"
-                for key in system.required_entities
+                for key in required_entities
             ):
                 return "FEL"
 
         return "OK"
 
     def as_dict(self) -> dict:
-        """Return registry data for sensor attributes."""
+        """Return registry data and capability information for status sensors."""
 
         systems = {}
         missing_entities = []
+        optional_missing_entities = []
         ambiguous_entities = []
 
         for system_id, system in self._systems.items():
             entities = {}
+            required_entity_keys = set(
+                system.capabilities.required_entity_keys
+            )
 
-            for key in system.required_entities:
+            for key, capability in system.capabilities.entities.items():
                 result = system.entities.get(key, EntityResolution())
 
                 entities[key] = {
                     "status": result.status,
+                    "capability": capability.as_dict(),
                     "entity_id": result.entity_id,
                     "unique_id": result.unique_id,
                     "platform": result.platform,
@@ -351,6 +359,7 @@ class SemEntityRegistry:
                     "system": system_id,
                     "entity": key,
                     "status": result.status,
+                    "required": capability.required,
                 }
 
                 if result.status == "ambiguous":
@@ -359,21 +368,30 @@ class SemEntityRegistry:
                         "matches": result.matches,
                     })
                 elif result.status != "found" and system.configured:
-                    missing_entities.append(item)
+                    if capability.required:
+                        missing_entities.append(item)
+                    else:
+                        optional_missing_entities.append(item)
 
             if not system.configured:
                 system_status = "not_configured"
-            elif all(
-                system.entities.get(key, EntityResolution()).status == "found"
-                for key in system.required_entities
-            ) and system.required_entities:
-                system_status = "OK"
             else:
-                system_status = "FEL"
+                system_status = (
+                    "OK"
+                    if required_entity_keys
+                    and all(
+                        system.entities.get(
+                            key, EntityResolution()
+                        ).status == "found"
+                        for key in required_entity_keys
+                    )
+                    else "FEL"
+                )
 
             systems[system_id] = {
                 "configured": system.configured,
                 "status": system_status,
+                "capabilities": system.capabilities.as_dict(),
                 "entities": entities if system.configured else {},
             }
 
@@ -381,6 +399,7 @@ class SemEntityRegistry:
             "status": self.get_status(),
             "systems": systems,
             "missing_entities": missing_entities,
+            "optional_missing_entities": optional_missing_entities,
             "ambiguous_entities": ambiguous_entities,
         }
 
