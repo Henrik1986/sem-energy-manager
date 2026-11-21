@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
 
 from .adapter import SemSystemAdapter
+from .capabilities import SystemCapabilities
 from .registry import SemEntityRegistry
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,6 +59,36 @@ class SemSystemManager:
         system_id = self.registry.get_active_system_id()
         return self._adapters.get(system_id) if system_id is not None else None
 
+    @property
+    def capabilities(self) -> SystemCapabilities | None:
+        """Return the active system's declared capabilities."""
+        adapter = self.active_adapter
+        return adapter.capabilities if adapter is not None else None
+
+    def is_entity_readable(self, entity_key: str) -> bool:
+        """Return whether the active adapter exposes readable data."""
+        capabilities = self.capabilities
+        return (
+            capabilities is not None
+            and capabilities.can_read_entity(entity_key)
+        )
+
+    def is_entity_writable(self, entity_key: str) -> bool:
+        """Return whether the active adapter supports writes for an entity."""
+        capabilities = self.capabilities
+        return (
+            capabilities is not None
+            and capabilities.can_write_entity(entity_key)
+        )
+
+    def supports_command(self, command: str) -> bool:
+        """Return whether the active adapter implements a SEM command."""
+        capabilities = self.capabilities
+        return (
+            capabilities is not None
+            and capabilities.supports_command(command)
+        )
+
     def get_entity_ids(self, entity_key: str) -> list[str]:
         """Return all active source entity IDs for a logical SEM entity."""
         adapter = self.active_adapter
@@ -92,7 +123,7 @@ class SemSystemManager:
     def get_sensor_value(self, entity_key: str, source_states=None):
         """Return an aggregated sensor value from every physical source."""
         adapter = self.active_adapter
-        if adapter is None:
+        if adapter is None or not self.is_entity_readable(entity_key):
             return None
         states = (
             list(source_states)
@@ -108,7 +139,7 @@ class SemSystemManager:
     ) -> dict[str, Any]:
         """Return common measurement metadata from all source entities."""
         adapter = self.active_adapter
-        if adapter is None:
+        if adapter is None or not self.is_entity_readable(entity_key):
             return {}
         if source_attributes is None:
             states = self.get_entity_states(entity_key)
@@ -124,7 +155,7 @@ class SemSystemManager:
     ) -> float | None:
         """Return a shared number value from all physical sources."""
         adapter = self.active_adapter
-        if adapter is None:
+        if adapter is None or not self.is_entity_readable(entity_key):
             return None
         states = (
             list(source_states)
@@ -140,7 +171,7 @@ class SemSystemManager:
     ) -> dict[str, Any]:
         """Return the common number range across all physical sources."""
         adapter = self.active_adapter
-        if adapter is None:
+        if adapter is None or not self.is_entity_readable(entity_key):
             return {}
         if source_attributes is None:
             states = self.get_entity_states(entity_key)
@@ -158,7 +189,7 @@ class SemSystemManager:
         adapter = self.active_adapter
         return (
             adapter.get_sem_options(entity_key, source_options)
-            if adapter is not None
+            if adapter is not None and self.is_entity_readable(entity_key)
             else []
         )
 
@@ -172,6 +203,8 @@ class SemSystemManager:
         adapter = self.active_adapter
         if adapter is None:
             raise ValueError("No unambiguous SEM energy system is active")
+        if not self.is_entity_writable(entity_key):
+            raise ValueError(f"SEM entity {entity_key} does not support writes")
         return adapter.to_source_options(
             entity_key,
             sem_option,
@@ -206,6 +239,11 @@ class SemSystemManager:
         if adapter is None:
             raise HomeAssistantError(
                 "No unambiguous SEM energy-system adapter is active"
+            )
+        if not self.supports_command(command):
+            raise HomeAssistantError(
+                f"SEM command is not supported by adapter {adapter.system_id}: "
+                f"{command}"
             )
         _LOGGER.debug(
             "Executing SEM command %s through adapter %s",
