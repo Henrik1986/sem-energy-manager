@@ -725,6 +725,27 @@ class SolaXAdapter(SemSystemAdapter):
             return None
         return _detect_generation(options)
 
+    def _night_charge_switch_issues(self) -> dict[str, str]:
+        """Report missing uniqueness or enablement for known night-charge switches."""
+        if self._hass is None:
+            return {}
+
+        entity_registry = er.async_get(self._hass)
+        sources_by_device: dict[str, list[EntitySource]] = defaultdict(list)
+        for source in self._get_sources(SOLAX_NIGHT_CHARGE_ENTITY_KEY):
+            if source.device_id is not None:
+                sources_by_device[source.device_id].append(source)
+
+        issues = {}
+        for device_id, sources in sources_by_device.items():
+            if len(sources) != 1:
+                issues[device_id] = "ambiguous"
+                continue
+            entity_entry = entity_registry.async_get(sources[0].entity_id)
+            if entity_entry is None or _disabled_by(entity_entry) is not None:
+                issues[device_id] = "disabled"
+        return issues
+
     def get_sem_options(
         self,
         entity_key: str,
@@ -749,6 +770,14 @@ class SolaXAdapter(SemSystemAdapter):
 
         generations = [_detect_generation(options) for options in source_options]
         if any(generation is None for generation in generations):
+            return []
+
+        night_charge_issues = self._night_charge_switch_issues()
+        if any(
+            generation == "gen4_plus"
+            and source.device_id in night_charge_issues
+            for source, generation in zip(sources, generations)
+        ):
             return []
 
         sem_options = []
@@ -811,12 +840,21 @@ class SolaXAdapter(SemSystemAdapter):
         night_charge_sources = self._night_charge_sources_by_device(
             enabled_only=True
         )
+        night_charge_issues = self._night_charge_switch_issues()
         translated = []
         for source, options in zip(sources, source_options):
             generation = _detect_generation(options)
             if generation is None:
                 raise ValueError(
                     f"Could not identify SolaX generation for {source.entity_id}"
+                )
+            if (
+                generation == "gen4_plus"
+                and source.device_id in night_charge_issues
+            ):
+                raise ValueError(
+                    "SolaX Selfuse Night Charge is disabled or ambiguous. "
+                    "Enable exactly one switch for each affected Gen4+ inverter."
                 )
 
             if sem_option == "self_consumption":
@@ -876,6 +914,7 @@ class SolaXAdapter(SemSystemAdapter):
         enabled_night_charge_sources = self._night_charge_sources_by_device(
             enabled_only=True
         )
+        night_charge_issues = self._night_charge_switch_issues()
         translated = []
 
         for source, source_option in zip(sources, source_options):
@@ -896,6 +935,9 @@ class SolaXAdapter(SemSystemAdapter):
             if source_option == "Feedin Priority":
                 translated.append("feed_in_priority")
             elif source_option == "Self Use Mode":
+                if source.device_id in night_charge_issues:
+                    translated.append(None)
+                    continue
                 if self._hass is None or source.device_id is None:
                     translated.append(None)
                     continue
