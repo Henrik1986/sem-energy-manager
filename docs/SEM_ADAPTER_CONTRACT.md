@@ -107,7 +107,7 @@ The Huawei adapter deliberately marks all 11 current logical entities as require
 
 The manager checks these declarations before returning sensor values, exposing number/select controls for use, accepting writes, or executing a SEM command. A service that is not declared by the active adapter is rejected.
 
-Provider-neutral capability reporting is now in place. Some detailed setup/runtime error text in the status sensor is still Huawei-specific and should be moved behind the adapter diagnostic interface before another provider is integrated.
+The shared adapter contract also owns setup and runtime error reporting. Adapters provide structured diagnostic data plus actionable setup/runtime error entries; the status sensor only displays those entries and does not inspect provider identifiers or source-specific settings.
 
 ## 9. Implementation notes for the shared layer
 
@@ -115,4 +115,4 @@ The shared adapter boundary is `SemSystemAdapter`, coordinated by `SemSystemMana
 
 Provider-independent aggregation and validation helpers now live in `systems/aggregation.py`; the shared number entity no longer imports a Huawei-named helper module. The capability definitions live in `systems/capabilities.py`.
 
-The Huawei adapter remains the regression reference. The next implementation step is to make setup/runtime diagnostics provider-neutral, then use the common contract to introduce and test another adapter without changing the YAML-facing entities or services.
+The Huawei adapter remains the regression reference and implements the shared setup/runtime error interface. The shared sensor and manager no longer contain Huawei-specific error logic. A new provider can supply its own diagnostic details without changing the YAML-facing entities or services.
