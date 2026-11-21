@@ -16,7 +16,7 @@ MODULE_PATH = (
 SPEC = importlib.util.spec_from_file_location("aggregation", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
 aggregation = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(huawei_aggregation)
+SPEC.loader.exec_module(aggregation)
 
 capacity_weighted_soc = aggregation.capacity_weighted_soc
 common_number_metadata = aggregation.common_number_metadata
