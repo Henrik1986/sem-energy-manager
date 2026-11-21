@@ -1,4 +1,4 @@
-"""Read-only adapter for supported SolaX Modbus inverter families."""
+"""Adapter for supported SolaX Modbus inverter families."""
 
 from __future__ import annotations
 
@@ -503,7 +503,7 @@ def _resolve_any_sources(
 
 
 class SolaXAdapter(SemSystemAdapter):
-    """Read-only adapter for SolaX Modbus hybrid inverters."""
+    """SolaX adapter with telemetry and generation-specific TOU control."""
 
     system_id = SOLAX_SYSTEM_ID
     integration_domain = SOLAX_DOMAIN
@@ -1643,44 +1643,52 @@ class SolaXAdapter(SemSystemAdapter):
             "battery_tou_discharge_end_2": discharge_slots[1][1],
         }
 
+        async def set_switches(
+            entity_ids: Sequence[str],
+            *,
+            turn_on: bool,
+        ) -> None:
+            """Write only switch states that actually need to change."""
+            target_state = "on" if turn_on else "off"
+            targets = [
+                entity_id
+                for entity_id in entity_ids
+                if hass.states.get(entity_id) is not None
+                and hass.states.get(entity_id).state != target_state
+            ]
+            if targets:
+                await hass.services.async_call(
+                    "switch",
+                    "turn_on" if turn_on else "turn_off",
+                    {"entity_id": targets},
+                    blocking=True,
+                )
+
         # Disable grid charging and Period 2 while all time registers are updated.
-        await hass.services.async_call(
-            "switch",
-            "turn_off",
-            {"entity_id": night_charge_ids},
-            blocking=True,
-        )
-        await hass.services.async_call(
-            "switch",
-            "turn_off",
-            {"entity_id": period2_ids},
-            blocking=True,
-        )
+        await set_switches(night_charge_ids, turn_on=False)
+        await set_switches(period2_ids, turn_on=False)
 
         for registry_key, value in time_values.items():
-            await hass.services.async_call(
-                "time",
-                "set_value",
-                {
-                    "entity_id": time_entity_ids[registry_key],
-                    "time": f"{value}:00",
-                },
-                blocking=True,
-            )
+            target_ids = [
+                entity_id
+                for entity_id in time_entity_ids[registry_key]
+                if hass.states.get(entity_id) is not None
+                and hass.states.get(entity_id).state[:5] != value
+            ]
+            if target_ids:
+                await hass.services.async_call(
+                    "time",
+                    "set_value",
+                    {
+                        "entity_id": target_ids,
+                        "time": f"{value}:00",
+                    },
+                    blocking=True,
+                )
 
         if period2_required:
-            await hass.services.async_call(
-                "switch",
-                "turn_on",
-                {"entity_id": period2_ids},
-                blocking=True,
-            )
+            await set_switches(period2_ids, turn_on=True)
 
         # Enable grid charging only after the charge time windows are written.
         if charge_periods:
-            await hass.services.async_call(
-                "switch",
-                "turn_on",
-                {"entity_id": night_charge_ids},
-                blocking=True,
-            )
+            await set_switches(night_charge_ids, turn_on=True)
