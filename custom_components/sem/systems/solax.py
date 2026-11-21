@@ -666,9 +666,21 @@ class SolaXAdapter(SemSystemAdapter):
             entity_key,
             source_attributes,
         )
-        if entity_key == "battery_rated_capacity" and metadata:
-            metadata["unit_of_measurement"] = "kWh"
-            metadata["suggested_display_precision"] = 2
+        if entity_key == "battery_state_of_capacity":
+            return {
+                "device_class": "battery",
+                "state_class": "measurement",
+                "unit_of_measurement": "%",
+                "suggested_display_precision": 0,
+            }
+        if entity_key == "battery_rated_capacity":
+            metadata.update(
+                {
+                    "device_class": "energy",
+                    "unit_of_measurement": "kWh",
+                    "suggested_display_precision": 2,
+                }
+            )
         return metadata
 
     def get_runtime_diagnostics(
