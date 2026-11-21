@@ -124,8 +124,8 @@ SOLAX_GEN5_MODEL_MARKERS = ("IES", "ULTRA", "VAST")
 
 SOLAX_GEN6_MODEL_MARKERS = ("VAST", "G4PRO")
 SOLAX_TOU_PERIOD_PATTERN = re.compile(
-    r"(?P<start>[01]\d|2[0-3]):[0-5]\d-"
-    r"(?P<end>[01]\d|2[0-3]):[0-5]\d/"
+    r"(?P<start>(?:[01]\d|2[0-3]):[0-5]\d)-"
+    r"(?P<end>(?:[01]\d|2[0-3]):[0-5]\d)/"
     r"(?P<days>[1-7]{7})/(?P<flag>[+-])"
 )
 
@@ -1602,14 +1602,14 @@ class SolaXAdapter(SemSystemAdapter):
             device_ids=device_ids,
         )
         time_entity_ids = {
-            source_key: self._require_sources_by_device(
+            registry_key: self._require_sources_by_device(
                 hass,
                 registry,
                 entity_key=registry_key,
                 domain="time",
                 device_ids=device_ids,
             )
-            for registry_key, source_key in SOLAX_TOU_TIME_ENTITY_MAP.items()
+            for registry_key in SOLAX_TOU_TIME_ENTITY_MAP
         }
 
         charge_periods = periods["charge"]
