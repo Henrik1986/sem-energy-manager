@@ -133,6 +133,8 @@ class SemSystemManager:
         adapter = self.active_adapter
         if adapter is None:
             return None
+        if adapter.has_virtual_number(entity_key):
+            return adapter.get_virtual_number_value(entity_key)
         states = (
             list(source_states)
             if source_states is not None
@@ -149,12 +151,51 @@ class SemSystemManager:
         adapter = self.active_adapter
         if adapter is None:
             return {}
+        if adapter.has_virtual_number(entity_key):
+            return adapter.get_virtual_number_metadata(entity_key)
         if source_attributes is None:
             states = self.get_entity_states(entity_key)
             source_attributes = [
                 state.attributes for state in states if state is not None
             ]
         return adapter.get_number_metadata(entity_key, source_attributes)
+
+    def has_virtual_number(self, entity_key: str) -> bool:
+        """Return whether the active adapter owns this number entity."""
+        adapter = self.active_adapter
+        return adapter is not None and adapter.has_virtual_number(entity_key)
+
+    def get_virtual_number_value(self, entity_key: str) -> float | None:
+        """Return the active adapter's virtual number value."""
+        adapter = self.active_adapter
+        if adapter is None or not adapter.has_virtual_number(entity_key):
+            return None
+        return adapter.get_virtual_number_value(entity_key)
+
+    def get_virtual_number_metadata(self, entity_key: str) -> dict[str, Any]:
+        """Return metadata for the active adapter's virtual number."""
+        adapter = self.active_adapter
+        if adapter is None or not adapter.has_virtual_number(entity_key):
+            return {}
+        return adapter.get_virtual_number_metadata(entity_key)
+
+    async def async_set_number_value(
+        self,
+        entity_key: str,
+        value: float,
+    ) -> bool:
+        """Give the active adapter the first opportunity to handle a number write."""
+        adapter = self.active_adapter
+        if adapter is None:
+            raise HomeAssistantError(
+                "No unambiguous SEM energy-system adapter is active"
+            )
+        return await adapter.async_set_number_value(
+            self.hass,
+            self.registry,
+            entity_key,
+            value,
+        )
 
     def get_select_options(
         self,
