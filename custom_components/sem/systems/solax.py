@@ -2563,6 +2563,7 @@ class SolaXAdapter(SemSystemAdapter):
     ) -> dict[str, Any]:
         """Report unsafe aggregation, meter conflicts and working-mode support."""
         errors = []
+        warnings = []
 
         expected_device_ids = set(self._battery_device_ids)
         physical_capacity_by_device = self._get_physical_capacity_by_device()
@@ -2608,7 +2609,7 @@ class SolaXAdapter(SemSystemAdapter):
                     f"{SOLAX_TOTAL_CAPACITY_HELPER}."
                 )
 
-            errors.append(
+            warnings.append(
                 {
                     "code": "solax_battery_capacity_fallback",
                     "setting": "Installerad batterikapacitet",
@@ -2732,6 +2733,8 @@ class SolaXAdapter(SemSystemAdapter):
         diagnostics = {}
         if errors:
             diagnostics["errors"] = errors
+        if warnings:
+            diagnostics["warnings"] = warnings
         if working_mode_generations:
             diagnostics["working_mode_generations"] = working_mode_generations
         return diagnostics
