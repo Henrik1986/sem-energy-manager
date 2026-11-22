@@ -68,6 +68,7 @@ SOLAX_MAXIMUM_DISCHARGING_NUMBER_METADATA = {
     "mode": "box",
 }
 SOLAX_GEN2_REMOTE_POWER_SETPOINT_SOURCE_KEY = "grid_export_limit"
+SOLAX_GRID_EXPORT_POWER_LIMIT_KEY = "grid_export_power_limit"
 SOLAX_GEN4_REMOTE_CONTROL_MODE_SOURCE_KEY = "remotecontrol_power_control_mode"
 SOLAX_GEN4_REMOTE_CONTROL_TRIGGER_SOURCE_KEY = "powercontrolmode8_trigger"
 SOLAX_GEN4_AUTOREPEAT_DURATION_SOURCE_KEY = "remotecontrol_autorepeat_duration"
@@ -107,6 +108,7 @@ SOLAX_OPTIONAL_ENTITIES = (
     "inverter_input_power",
     "end_of_discharge_soc",
     *SOLAX_TOU_OPTIONAL_ENTITIES,
+    SOLAX_GRID_EXPORT_POWER_LIMIT_KEY,
 )
 
 # SEM key -> (HA domain, SolaX entity key, source scope).
@@ -137,6 +139,11 @@ SOLAX_ENTITY_MAP = {
         "sensor",
         "measured_power",
         "any",
+    ),
+    SOLAX_GRID_EXPORT_POWER_LIMIT_KEY: (
+        "number",
+        "export_control_user_limit",
+        "inverter",
     ),
 }
 
@@ -1127,7 +1134,14 @@ class SolaXAdapter(SemSystemAdapter):
                     ) == "found"
                     else "not_configured"
                 ),
-                "write.grid_export_power_limit": "not_implemented",
+                "write.grid_export_power_limit": (
+                    "implemented"
+                    if registry.get_entity_status(
+                        SOLAX_SYSTEM_ID,
+                        SOLAX_GRID_EXPORT_POWER_LIMIT_KEY,
+                    ) == "found"
+                    else "not_configured"
+                ),
                 "write.time_of_use": "gen4_5_only",
             }
         )
@@ -2830,6 +2844,70 @@ class SolaXAdapter(SemSystemAdapter):
         data: dict[str, Any],
     ) -> None:
         """Execute supported SolaX commands with generation-specific guards."""
+        if command == "set_grid_export_power_limit":
+            power = parse_numeric(data.get("power"))
+            if power is None or power < 0:
+                raise HomeAssistantError(
+                    "SolaX grid export power limit must be a finite number "
+                    "greater than or equal to zero"
+                )
+
+            export_sources = registry.get_entity_sources(
+                self.system_id,
+                SOLAX_GRID_EXPORT_POWER_LIMIT_KEY,
+            )
+            device_ids = sorted({
+                source.device_id
+                for source in export_sources
+                if source.device_id is not None
+            })
+            if (
+                registry.get_entity_status(
+                    self.system_id,
+                    SOLAX_GRID_EXPORT_POWER_LIMIT_KEY,
+                ) != "found"
+                or not export_sources
+                or any(source.device_id is None for source in export_sources)
+                or len(device_ids) != len(export_sources)
+            ):
+                raise HomeAssistantError(
+                    "SolaX export-control limit entities are not fully resolved"
+                )
+
+            entity_ids = self._require_sources_by_device(
+                hass,
+                registry,
+                entity_key=SOLAX_GRID_EXPORT_POWER_LIMIT_KEY,
+                domain="number",
+                device_ids=device_ids,
+            )
+            targets = []
+            for entity_id in entity_ids:
+                state = hass.states.get(entity_id)
+                current_value = (
+                    parse_numeric(state.state) if state is not None else None
+                )
+                if current_value is None or not math.isclose(
+                    current_value,
+                    power,
+                    rel_tol=0.0,
+                    abs_tol=1e-6,
+                ):
+                    targets.append(entity_id)
+
+            if targets:
+                if not hass.services.has_service("number", "set_value"):
+                    raise HomeAssistantError(
+                        "Home Assistant number.set_value service is not available"
+                    )
+                await hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": targets, "value": power},
+                    blocking=True,
+                )
+            return
+
         if command != "set_battery_time_of_use_periods":
             raise HomeAssistantError(
                 f"Unsupported SEM command for SolaX: {command}"
