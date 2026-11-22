@@ -808,10 +808,10 @@ class SolaXAdapter(SemSystemAdapter):
             return
 
         terminal_states = {"loaded", "failed", "not_loaded"}
-        for _ in range(60):
+        for _ in range(120):
             if all(_entry_state(entry) in terminal_states for entry in entries):
                 break
-            await asyncio.sleep(2)
+            await asyncio.sleep(5)
 
         loaded_entries = [
             entry for entry in entries if _entry_state(entry) == "loaded"
