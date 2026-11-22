@@ -68,6 +68,19 @@ def test_single_and_multiple_source_values_are_summed() -> None:
     assert sum_numeric_values([1250, 875]) == 2125
 
 
+def test_battery_power_preserves_charge_and_discharge_signs() -> None:
+    # SolaX: positive means charging; negative means discharging.
+    assert sum_numeric_values([2500]) == 2500
+    assert sum_numeric_values([-1500]) == -1500
+
+    # Multiple battery inverters are combined as a signed net value.
+    assert sum_numeric_values([2500, -500]) == 2000
+    assert sum_numeric_values([-2500, 500]) == -2000
+
+    # Do not report a partial total if one battery source is unavailable.
+    assert sum_numeric_values([2500, "unavailable"]) is None
+
+
 def test_sum_does_not_partially_aggregate_unavailable_sources() -> None:
     assert sum_numeric_values([1250, "unavailable"]) is None
     assert sum_numeric_values([]) is None
