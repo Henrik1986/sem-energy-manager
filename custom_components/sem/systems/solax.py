@@ -145,20 +145,11 @@ SOLAX_ENTITY_MAP = {
 # capacity data is absent, so SEM must not use it for these generations.
 SOLAX_DIRECT_SOC_KEY = "battery_total_capacity_charge"
 SOLAX_SOC_SOURCE_KEY = "battery_capacity"
-SOLAX_LEGACY_SOC_KEY = SOLAX_SOC_SOURCE_KEY
 SOLAX_CAPACITY_SOURCE_KEYS = (
     "battery_system_installed_capacity",
     "battery_install_capacity",
 )
 SOLAX_TOTAL_CAPACITY_HELPER = "input_number.sem_battery_total_capacity_kwh"
-SOLAX_GEN5_BATTERY_KEYS = frozenset(
-    {
-        "battery_total_capacity_charge",
-        "battery_1_capacity_charge",
-        "battery_2_capacity_charge",
-    }
-)
-SOLAX_GEN5_MODEL_MARKERS = ("IES", "ULTRA", "VAST")
 
 SOLAX_GEN4_MODEL_PREFIXES = (
     "X1-HYBRID-",
@@ -392,22 +383,6 @@ def _source_from_entry(
         device_type="inverter",
         owner_device_id=device_id,
         config_entry_id=entity_entry.config_entry_id,
-    )
-
-
-def _is_gen5_or_gen6(
-    device: Any,
-    device_entities: Sequence[Any],
-) -> bool:
-    """Identify Gen5/6 devices where the computed SOC may use an unsafe fallback."""
-    model = str(getattr(device, "model", "") or "").upper()
-    if any(marker in model for marker in SOLAX_GEN5_MODEL_MARKERS):
-        return True
-
-    return any(
-        _entity_key_matches(entity.unique_id, key)
-        for entity in device_entities
-        for key in SOLAX_GEN5_BATTERY_KEYS
     )
 
 
@@ -923,7 +898,7 @@ class SolaXAdapter(SemSystemAdapter):
                 and entry.device_id is not None
                 and (
                     _entity_key_matches(entry.unique_id, "battery_power_charge")
-                    or _entity_key_matches(entry.unique_id, SOLAX_LEGACY_SOC_KEY)
+                    or _entity_key_matches(entry.unique_id, SOLAX_SOC_SOURCE_KEY)
                     or _entity_key_matches(entry.unique_id, SOLAX_DIRECT_SOC_KEY)
                 )
             }
