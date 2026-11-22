@@ -170,9 +170,11 @@ class SemEntityStatusSensor(SensorEntity):
         setup_errors = self._get_setup_errors(attributes)
         diagnostics = self._manager.get_runtime_diagnostics()
         runtime_errors = self._get_runtime_errors(diagnostics)
+        runtime_warnings = self._get_runtime_warnings(diagnostics)
         attributes["setup_errors"] = setup_errors
         attributes["runtime_diagnostics"] = diagnostics
         attributes["runtime_errors"] = runtime_errors
+        attributes["runtime_warnings"] = runtime_warnings
 
         if setup_errors:
             attributes["status_message"] = setup_errors[0]["message"]
@@ -180,6 +182,9 @@ class SemEntityStatusSensor(SensorEntity):
         elif runtime_errors:
             attributes["status_message"] = runtime_errors[0]["message"]
             attributes["action_required"] = runtime_errors[0]["action"]
+        elif runtime_warnings:
+            attributes["status_message"] = runtime_warnings[0]["message"]
+            attributes["action_required"] = runtime_warnings[0]["action"]
         elif self._registry.get_status() == "OK":
             attributes["status_message"] = (
                 "Alla obligatoriska entiteter hittades. SEM är redo."
@@ -305,6 +310,12 @@ class SemEntityStatusSensor(SensorEntity):
             "entities": capacity.get("matches", []),
         }]
 
+    def _get_runtime_warnings(self, diagnostics: dict) -> list[dict]:
+        """Format non-blocking adapter warnings for the status sensor."""
+        return self._get_runtime_errors(
+            {"errors": diagnostics.get("warnings", [])}
+        )
+
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         self.async_on_remove(
@@ -418,7 +429,9 @@ class SemEntityStatusSensor(SensorEntity):
         """Log each new or changed mismatch once, avoiding repeated warnings."""
         diagnostics = self._manager.get_runtime_diagnostics()
         errors = self._get_runtime_errors(diagnostics)
-        if not errors:
+        warnings = self._get_runtime_warnings(diagnostics)
+        messages = errors + warnings
+        if not messages:
             self._last_logged_mismatch_signature = None
             return
 
@@ -426,17 +439,17 @@ class SemEntityStatusSensor(SensorEntity):
             (
                 error["code"],
                 tuple(
-                    (source["entity_id"], source["value"])
+                    (source.get("entity_id"), source.get("value"))
                     for source in error["sources"]
                 ),
             )
-            for error in errors
+            for error in messages
         )
         if signature == self._last_logged_mismatch_signature:
             return
 
         self._last_logged_mismatch_signature = signature
-        for error in errors:
+        for error in messages:
             _LOGGER.warning(
                 "SEM: %s Åtgärd: %s",
                 error["message"],
@@ -455,6 +468,9 @@ class SemEntityStatusSensor(SensorEntity):
                     if source.get("entity_id")
                 )
 
+        source_ids.extend(
+            self._manager.get_related_entity_ids("battery_state_of_capacity")
+        )
         source_ids = sorted(set(source_ids))
         if source_ids == self._source_entity_ids:
             return
