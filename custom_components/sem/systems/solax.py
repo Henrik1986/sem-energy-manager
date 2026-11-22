@@ -2511,8 +2511,9 @@ class SolaXAdapter(SemSystemAdapter):
             )
 
         if entity_key == "power_meter_active_power":
-            # Multiple inverter entries can mirror the same plant meter.
-            # Compare them; never add duplicate plant-level meter readings.
+            # SolaX measured_power is positive for export and negative for import.
+            # Preserve this sign convention. Multiple inverter entries can mirror
+            # the same plant meter, so compare them rather than summing them.
             return plant_meter_value(
                 [state.state for state in source_states if state is not None]
             )
