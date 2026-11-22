@@ -80,6 +80,14 @@ def test_plant_meter_duplicates_are_compared_not_summed() -> None:
     assert plant_meter_value([1000, "unavailable"]) is None
 
 
+def test_plant_meter_preserves_export_and_import_signs() -> None:
+    # SolaX reports export as positive and import as negative.
+    assert plant_meter_value([2500]) == 2500
+    assert plant_meter_value([-2500]) == -2500
+    assert plant_meter_value([2500, 2550]) == 2525
+    assert plant_meter_value([-2500, -2550]) == -2525
+
+
 def test_number_metadata_uses_intersection_of_physical_ranges() -> None:
     metadata = common_number_metadata([
         {
