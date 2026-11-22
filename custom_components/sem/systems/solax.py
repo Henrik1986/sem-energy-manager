@@ -17,6 +17,11 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 
 from .adapter import SemSystemAdapter
+from .capacity_aggregation import (
+    complete_capacity_map,
+    normalize_capacity_kwh,
+    total_capacity_kwh,
+)
 from .huawei_aggregation import (
     capacity_weighted_soc,
     parse_numeric,
@@ -113,11 +118,6 @@ SOLAX_ENTITY_MAP = {
         "battery_power_charge",
         "battery",
     ),
-    "battery_rated_capacity": (
-        "sensor",
-        "battery_system_installed_capacity",
-        "battery",
-    ),
     "battery_day_charge": (
         "sensor",
         "battery_input_energy_today",
@@ -144,7 +144,13 @@ SOLAX_ENTITY_MAP = {
 # battery_capacity entity can fall back to the lowest module SOC when BMS
 # capacity data is absent, so SEM must not use it for these generations.
 SOLAX_DIRECT_SOC_KEY = "battery_total_capacity_charge"
-SOLAX_LEGACY_SOC_KEY = "battery_capacity"
+SOLAX_SOC_SOURCE_KEY = "battery_capacity"
+SOLAX_LEGACY_SOC_KEY = SOLAX_SOC_SOURCE_KEY
+SOLAX_CAPACITY_SOURCE_KEYS = (
+    "battery_system_installed_capacity",
+    "battery_install_capacity",
+)
+SOLAX_TOTAL_CAPACITY_HELPER = "input_number.sem_battery_total_capacity_kwh"
 SOLAX_GEN5_BATTERY_KEYS = frozenset(
     {
         "battery_total_capacity_charge",
@@ -489,6 +495,97 @@ def _resolve_expected_sources(
     )
 
 
+def _resolve_capacity_sources(
+    registry: SemEntityRegistry,
+    device_registry: dr.DeviceRegistry,
+    *,
+    matches: Sequence[Any],
+    expected_device_ids: Sequence[str],
+) -> None:
+    """Resolve optional installed-capacity sensors without discarding partial data."""
+    active_by_device: dict[str, list[Any]] = defaultdict(list)
+    disabled_by_device: dict[str, list[Any]] = defaultdict(list)
+    expected = set(expected_device_ids)
+
+    for entity_entry in matches:
+        device_id = entity_entry.device_id
+        if device_id not in expected:
+            continue
+
+        target = (
+            active_by_device
+            if _disabled_by(entity_entry) is None
+            else disabled_by_device
+        )
+        target[device_id].append(entity_entry)
+
+    duplicates = {
+        device_id
+        for device_id, entries in active_by_device.items()
+        if len(entries) > 1
+    }
+    missing_ids = [
+        device_id
+        for device_id in expected_device_ids
+        if not active_by_device.get(device_id)
+    ]
+    all_matches = [
+        entry
+        for device_id in expected_device_ids
+        for entry in (
+            active_by_device.get(device_id, [])
+            + disabled_by_device.get(device_id, [])
+        )
+    ]
+
+    if not expected_device_ids:
+        status = "missing"
+        selected = []
+    elif duplicates:
+        status = "ambiguous"
+        selected = [
+            entry
+            for device_id in expected_device_ids
+            for entry in active_by_device.get(device_id, [])
+        ]
+    elif missing_ids:
+        status = (
+            "disabled"
+            if any(disabled_by_device.get(device_id) for device_id in missing_ids)
+            else "missing"
+        )
+        # Keep enabled sources for the devices that did resolve. They can be
+        # combined with the configured plant total when exactly one is missing.
+        selected = [
+            active_by_device[device_id][0]
+            for device_id in expected_device_ids
+            if active_by_device.get(device_id)
+        ]
+    else:
+        status = "found"
+        selected = [
+            active_by_device[device_id][0]
+            for device_id in expected_device_ids
+        ]
+
+    sources = [
+        _source_from_entry(entry, device_registry)
+        for entry in selected
+    ]
+    registry.set_entity_result(
+        SOLAX_SYSTEM_ID,
+        "battery_rated_capacity",
+        status=status,
+        entity_id=sources[0].entity_id if sources else None,
+        unique_id=sources[0].unique_id if sources else None,
+        platform=SOLAX_DOMAIN if sources else None,
+        device_id=sources[0].device_id if sources else None,
+        config_entry_id=sources[0].config_entry_id if sources else None,
+        matches=[entry.entity_id for entry in all_matches],
+        sources=sources,
+    )
+
+
 def _resolve_paired_number_sources(
     registry: SemEntityRegistry,
     device_registry: dr.DeviceRegistry,
@@ -664,6 +761,7 @@ class SolaXAdapter(SemSystemAdapter):
         self._maximum_discharging_store: Store | None = None
         self._maximum_discharging_value: float | None = None
         self._maximum_discharging_override: dict[str, Any] | None = None
+        self._battery_device_ids: list[str] = []
 
     async def async_setup(
         self,
@@ -835,6 +933,8 @@ class SolaXAdapter(SemSystemAdapter):
             # declaring a configured battery system inactive.
             battery_device_ids = inverter_device_ids
 
+        self._battery_device_ids = list(battery_device_ids)
+
         entities_by_device: dict[str, list[Any]] = defaultdict(list)
         for entry in entity_entries:
             if entry.device_id is not None:
@@ -861,32 +961,40 @@ class SolaXAdapter(SemSystemAdapter):
             source_keys=SOLAX_END_OF_DISCHARGE_SOC_SOURCE_KEYS,
         )
 
-        # Resolve SOC with a generation-aware source key.
-        soc_matches = []
-        soc_expected_ids = []
-        for device_id in battery_device_ids:
-            device_entries = entities_by_device.get(device_id, [])
-            device = inverter_devices.get(device_id)
-            gen5_or_6 = _is_gen5_or_gen6(device, device_entries)
-            source_key = (
-                SOLAX_DIRECT_SOC_KEY
-                if gen5_or_6
-                else SOLAX_LEGACY_SOC_KEY
-            )
-            soc_expected_ids.append(device_id)
-            soc_matches.extend(
-                entry
-                for entry in device_entries
-                if entry.domain == "sensor"
-                and _entity_key_matches(entry.unique_id, source_key)
-            )
-
+        # Use SolaX's common battery_capacity entity for Gen2-6. In Gen5/6
+        # the upstream integration computes this value from the total SOC
+        # register or the module SOC values when BMS data is incomplete.
+        soc_matches = [
+            entry
+            for entry in entity_entries
+            if entry.domain == "sensor"
+            and _entity_key_matches(entry.unique_id, SOLAX_SOC_SOURCE_KEY)
+        ]
         _resolve_expected_sources(
             registry,
             device_registry,
             entity_key="battery_state_of_capacity",
             matches=soc_matches,
-            expected_device_ids=soc_expected_ids,
+            expected_device_ids=battery_device_ids,
+        )
+
+        # Gen3 exposes Battery Install Capacity in kWh. Gen4-6 expose
+        # Battery System Installed Capacity in Wh. Gen2 has no equivalent
+        # standard installed-capacity entity in the upstream integration.
+        capacity_matches = [
+            entry
+            for entry in entity_entries
+            if entry.domain == "sensor"
+            and any(
+                _entity_key_matches(entry.unique_id, source_key)
+                for source_key in SOLAX_CAPACITY_SOURCE_KEYS
+            )
+        ]
+        _resolve_capacity_sources(
+            registry,
+            device_registry,
+            matches=capacity_matches,
+            expected_device_ids=battery_device_ids,
         )
 
         mode_matches = [
@@ -1916,12 +2024,33 @@ class SolaXAdapter(SemSystemAdapter):
 
     def get_related_entity_ids(self, entity_key: str) -> list[str]:
         """Return auxiliary entities that affect a SEM entity's state."""
-        if entity_key != "battery_working_mode" or self._registry is None:
+        if self._registry is None:
             return []
-        return self._registry.get_entity_ids(
-            self.system_id,
-            SOLAX_NIGHT_CHARGE_ENTITY_KEY,
-        )
+
+        related_ids = []
+        if entity_key == "battery_working_mode":
+            related_ids.extend(
+                self._registry.get_entity_ids(
+                    self.system_id,
+                    SOLAX_NIGHT_CHARGE_ENTITY_KEY,
+                )
+            )
+
+        if entity_key in {
+            "battery_state_of_capacity",
+            "battery_rated_capacity",
+        }:
+            # Capacity sources remain relevant when only some devices resolve.
+            related_ids.extend(
+                source.entity_id
+                for source in self._registry.get_entity_sources(
+                    self.system_id,
+                    "battery_rated_capacity",
+                )
+            )
+            related_ids.append(SOLAX_TOTAL_CAPACITY_HELPER)
+
+        return sorted(set(related_ids))
 
     def _night_charge_sources_by_device(
         self,
@@ -2358,6 +2487,9 @@ class SolaXAdapter(SemSystemAdapter):
         source_states: Sequence[State | None],
     ) -> float | str | None:
         """Normalize SolaX readings to the SEM sensor contract."""
+        if entity_key == "battery_rated_capacity":
+            return self._get_total_capacity_kwh()
+
         if not source_states or any(
             state is None or state.state in ("unknown", "unavailable")
             for state in source_states
@@ -2365,8 +2497,20 @@ class SolaXAdapter(SemSystemAdapter):
             return None
 
         if entity_key == "battery_state_of_capacity":
+            if (
+                self._registry is None
+                or self._registry.get_entity_status(
+                    self.system_id,
+                    "battery_state_of_capacity",
+                ) != "found"
+            ):
+                return None
+
             soc_sources = self._get_sources(entity_key)
-            if len(soc_sources) != len(source_states):
+            if (
+                len(soc_sources) != len(source_states)
+                or len(soc_sources) != len(self._battery_device_ids)
+            ):
                 return None
 
             soc_by_device = {}
@@ -2380,6 +2524,8 @@ class SolaXAdapter(SemSystemAdapter):
                     return None
                 soc_by_device[source.device_id] = value
 
+            if set(soc_by_device) != set(self._battery_device_ids):
+                return None
             if len(soc_by_device) == 1:
                 return next(iter(soc_by_device.values()))
 
@@ -2388,13 +2534,6 @@ class SolaXAdapter(SemSystemAdapter):
                 soc_by_device,
                 capacity_by_device,
             )
-
-        if entity_key == "battery_rated_capacity":
-            # SolaX exposes installed capacity in Wh; SEM standardizes it to kWh.
-            total_wh = sum_numeric_values(
-                state.state for state in source_states if state is not None
-            )
-            return total_wh / 1000 if total_wh is not None else None
 
         if entity_key == "power_meter_active_power":
             # Multiple inverter entries can mirror the same plant meter.
@@ -2450,47 +2589,72 @@ class SolaXAdapter(SemSystemAdapter):
         """Report unsafe aggregation, meter conflicts and working-mode support."""
         errors = []
 
-        soc_sources = registry.get_entity_sources(
-            self.system_id,
-            "battery_state_of_capacity",
+        expected_device_ids = set(self._battery_device_ids)
+        physical_capacity_by_device = self._get_physical_capacity_by_device()
+        missing_capacity_ids = (
+            expected_device_ids - set(physical_capacity_by_device)
         )
-        capacity_by_device = self._get_capacity_by_device()
-        soc_device_ids = {
-            source.device_id
-            for source in soc_sources
-            if source.device_id is not None
-        }
-        if (
-            registry.get_entity_status(
-                self.system_id,
-                "battery_state_of_capacity",
-            ) == "found"
-            and len(soc_device_ids) > 1
-            and (
-                registry.get_entity_status(
-                    self.system_id,
-                    "battery_rated_capacity",
-                ) != "found"
-                or set(capacity_by_device) != soc_device_ids
+
+        if missing_capacity_ids:
+            configured_total = self._get_configured_total_capacity_kwh()
+            completed_capacity_map = self._get_capacity_by_device()
+            fallback_can_weight = (
+                set(completed_capacity_map) == expected_device_ids
+                and bool(expected_device_ids)
             )
-        ):
+
+            if configured_total is not None and fallback_can_weight:
+                message = (
+                    "SEM använder "
+                    f"{SOLAX_TOTAL_CAPACITY_HELPER} som reservvärde för att "
+                    "komplettera installerad batterikapacitet. Aktivera ändå "
+                    "de fysiska kapacitetssensorerna när de finns tillgängliga."
+                )
+            elif configured_total is not None:
+                message = (
+                    "SEM har ett manuellt totalvärde för batterikapaciteten, "
+                    "men fysisk kapacitet saknas för flera SolaX-växelriktare. "
+                    "Totalvärdet kan visas, men det går inte att fördela säkert "
+                    "mellan flera batterier. Kapacitetsviktad SOC är därför "
+                    "inte tillgänglig."
+                )
+            elif len(expected_device_ids) > 1:
+                message = (
+                    "SEM saknar installerad kapacitet för en eller flera "
+                    "SolaX-växelriktare. Kapacitetsviktad SOC kan inte beräknas "
+                    "utan individuella kapaciteter eller ett användbart "
+                    f"reservvärde i {SOLAX_TOTAL_CAPACITY_HELPER}."
+                )
+            else:
+                message = (
+                    "SEM kan läsa SOC direkt från det enda batteriet, men "
+                    "saknar en källa för total installerad batterikapacitet. "
+                    f"Ange anläggningens totala kapacitet i "
+                    f"{SOLAX_TOTAL_CAPACITY_HELPER}."
+                )
+
             errors.append(
                 {
-                    "code": "solax_soc_capacity_missing",
-                    "setting": "Batteriets SOC",
-                    "message": (
-                        "SEM kan inte beräkna ett kapacitetsviktat SOC-värde "
-                        "för flera SolaX-växelriktare eftersom installerad "
-                        "batterikapacitet saknas eller är inaktiverad."
-                    ),
+                    "code": "solax_battery_capacity_fallback",
+                    "setting": "Installerad batterikapacitet",
+                    "message": message,
                     "action": (
-                        "Aktivera entiteten Battery System Installed Capacity "
-                        "för varje SolaX-växelriktare som stöder den. "
-                        "Gen2/Gen3 saknar denna standardentitet; använd då "
-                        "en enda batterikälla eller avvakta stöd för "
-                        "kapacitetsuppgift från annan källa."
+                        "Aktivera 'Battery Install Capacity' på Gen3. På "
+                        "Gen4-Gen6 aktiverar du 'Battery System Installed "
+                        "Capacity'. Gen2 saknar motsvarande standardentitet; "
+                        f"ange då totalen i {SOLAX_TOTAL_CAPACITY_HELPER}. "
+                        "Ladda därefter om SEM-integrationen."
                     ),
-                    "sources": [],
+                    "sources": [
+                        {
+                            "entity_id": source.entity_id,
+                            "device_id": source.device_id,
+                        }
+                        for source in registry.get_entity_sources(
+                            self.system_id,
+                            "battery_rated_capacity",
+                        )
+                    ],
                 }
             )
 
@@ -2604,34 +2768,73 @@ class SolaXAdapter(SemSystemAdapter):
         # State aggregation uses the same ordering as get_entity_ids().
         return self._registry.get_entity_sources(self.system_id, entity_key)
 
-    def _get_capacity_by_device(self) -> dict[str, float]:
-        """Read installed capacity for every inverter, in its native Wh value."""
+    def _get_configured_total_capacity_kwh(self) -> float | None:
+        """Read the user-configured total installed battery capacity."""
+        if self._hass is None:
+            return None
+        state = self._hass.states.get(SOLAX_TOTAL_CAPACITY_HELPER)
+        if state is None:
+            return None
+        value = parse_numeric(state.state)
+        return value if value is not None and value > 0 else None
+
+    def _get_physical_capacity_by_device(self) -> dict[str, float]:
+        """Read all currently available physical capacity values in kWh."""
         if self._hass is None or self._registry is None:
             return {}
         if (
             self._registry.get_entity_status(
                 self.system_id,
                 "battery_rated_capacity",
-            ) != "found"
+            ) == "ambiguous"
         ):
             return {}
 
         capacities = {}
         for source in self._get_sources("battery_rated_capacity"):
-            if source.device_id is None:
+            if source.device_id is None or source.device_id in capacities:
                 return {}
+
             state = self._hass.states.get(source.entity_id)
-            value = (
-                parse_numeric(state.state)
-                if state is not None
-                else None
+            if state is None:
+                continue
+
+            source_key = next(
+                (
+                    key
+                    for key in SOLAX_CAPACITY_SOURCE_KEYS
+                    if source.unique_id
+                    and _entity_key_matches(source.unique_id, key)
+                ),
+                None,
             )
-            if value is None or value <= 0:
-                return {}
-            if source.device_id in capacities:
-                return {}
-            capacities[source.device_id] = value
+            capacity = normalize_capacity_kwh(
+                state.state,
+                state.attributes.get("unit_of_measurement"),
+                source_key,
+            )
+            if capacity is not None:
+                capacities[source.device_id] = capacity
+
         return capacities
+
+    def _get_capacity_by_device(self) -> dict[str, float]:
+        """Return complete per-inverter capacities, using one safe residual."""
+        physical_capacities = self._get_physical_capacity_by_device()
+        completed = complete_capacity_map(
+            physical_capacities,
+            self._battery_device_ids,
+            self._get_configured_total_capacity_kwh(),
+        )
+        return completed or {}
+
+    def _get_total_capacity_kwh(self) -> float | None:
+        """Return the complete physical total or the configured plant total."""
+        return total_capacity_kwh(
+            self._get_physical_capacity_by_device(),
+            self._battery_device_ids,
+            self._get_configured_total_capacity_kwh(),
+        )
 
     async def async_execute(
         self,
