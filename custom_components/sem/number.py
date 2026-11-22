@@ -40,19 +40,27 @@ class SemSystemNumber(SemEntityProxyMixin, NumberEntity):
         self._attr_mode = NumberMode.AUTO
 
     def _update_from_source(self) -> None:
-        """Mirror a shared value and the range common to all source entities."""
+        """Mirror a physical number or an adapter-managed virtual number."""
         states = self.source_states
-        attributes = [
-            state.attributes for state in states if state is not None
-        ]
-        metadata = self._manager.get_number_metadata(
-            self._entity_key,
-            attributes,
-        )
-        self._attr_native_value = self._manager.get_number_value(
-            self._entity_key,
-            states,
-        )
+        if self._manager.has_virtual_number(self._entity_key):
+            metadata = self._manager.get_virtual_number_metadata(
+                self._entity_key
+            )
+            self._attr_native_value = self._manager.get_virtual_number_value(
+                self._entity_key
+            )
+        else:
+            attributes = [
+                state.attributes for state in states if state is not None
+            ]
+            metadata = self._manager.get_number_metadata(
+                self._entity_key,
+                attributes,
+            )
+            self._attr_native_value = self._manager.get_number_value(
+                self._entity_key,
+                states,
+            )
         self._attr_native_min_value = self._number_attribute(
             metadata, "min_value", 0
         )
@@ -81,7 +89,17 @@ class SemSystemNumber(SemEntityProxyMixin, NumberEntity):
             return default
 
     async def async_set_native_value(self, value: float) -> None:
-        """Validate the requested value against every physical number entity."""
+        """Apply an adapter-managed value or mirror it to physical number entities."""
+        if self._manager.has_virtual_number(self._entity_key):
+            handled = await self._manager.async_set_number_value(
+                self._entity_key,
+                value,
+            )
+            if handled:
+                self._update_from_source()
+                self.async_write_ha_state()
+                return
+
         states = self.source_states
         if not states or any(state is None for state in states):
             raise HomeAssistantError(
@@ -125,7 +143,9 @@ class SemSystemNumber(SemEntityProxyMixin, NumberEntity):
 
     @property
     def available(self) -> bool:
-        """Require valid common limits for every physical number entity."""
+        """Require either an active virtual number or valid physical sources."""
+        if self._manager.has_virtual_number(self._entity_key):
+            return True
         states = self.source_states
         attributes = [
             state.attributes for state in states if state is not None
