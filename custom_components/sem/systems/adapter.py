@@ -125,6 +125,28 @@ class SemSystemAdapter(ABC):
             "mode": next(iter(modes)),
         }
 
+    def has_virtual_number(self, entity_key: str) -> bool:
+        """Return whether this adapter provides a number without a physical source."""
+        return False
+
+    def get_virtual_number_value(self, entity_key: str) -> float | None:
+        """Return the current value for an adapter-managed virtual number."""
+        return None
+
+    def get_virtual_number_metadata(self, entity_key: str) -> dict[str, Any]:
+        """Return number metadata for an adapter-managed virtual number."""
+        return {}
+
+    async def async_set_number_value(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        entity_key: str,
+        value: float,
+    ) -> bool:
+        """Handle an adapter-managed number; return False for ordinary proxies."""
+        return False
+
     def get_sem_options(
         self,
         entity_key: str,
