@@ -96,8 +96,16 @@ class SemSystemManager:
             return []
         return self.registry.get_entity_ids(adapter.system_id, entity_key)
 
+    def get_related_entity_ids(self, entity_key: str) -> list[str]:
+        """Return auxiliary source IDs used to derive a SEM entity state."""
+        adapter = self.active_adapter
+        if adapter is None:
+            return []
+        return adapter.get_related_entity_ids(entity_key)
+
     def get_entity_id(self, entity_key: str) -> str | None:
         """Return the first source entity ID for backwards compatibility."""
+
         entity_ids = self.get_entity_ids(entity_key)
         return entity_ids[0] if entity_ids else None
 
@@ -157,6 +165,8 @@ class SemSystemManager:
         adapter = self.active_adapter
         if adapter is None or not self.is_entity_readable(entity_key):
             return None
+        if adapter.has_virtual_number(entity_key):
+            return adapter.get_virtual_number_value(entity_key)
         states = (
             list(source_states)
             if source_states is not None
@@ -179,6 +189,47 @@ class SemSystemManager:
                 state.attributes for state in states if state is not None
             ]
         return adapter.get_number_metadata(entity_key, source_attributes)
+
+    def has_virtual_number(self, entity_key: str) -> bool:
+        """Return whether the active adapter owns this number entity."""
+        adapter = self.active_adapter
+        return adapter is not None and adapter.has_virtual_number(entity_key)
+
+    def get_virtual_number_value(self, entity_key: str) -> float | None:
+        """Return the active adapter's virtual number value."""
+        adapter = self.active_adapter
+        if adapter is None or not adapter.has_virtual_number(entity_key):
+            return None
+        return adapter.get_virtual_number_value(entity_key)
+
+    def get_virtual_number_metadata(self, entity_key: str) -> dict[str, Any]:
+        """Return metadata for the active adapter's virtual number."""
+        adapter = self.active_adapter
+        if adapter is None or not adapter.has_virtual_number(entity_key):
+            return {}
+        return adapter.get_virtual_number_metadata(entity_key)
+
+    async def async_set_number_value(
+        self,
+        entity_key: str,
+        value: float,
+    ) -> bool:
+        """Give the active adapter the first opportunity to handle a number write."""
+        adapter = self.active_adapter
+        if adapter is None:
+            raise HomeAssistantError(
+                "No unambiguous SEM energy-system adapter is active"
+            )
+        if not self.is_entity_writable(entity_key):
+            raise HomeAssistantError(
+                f"SEM entity {entity_key} does not support writes"
+            )
+        return await adapter.async_set_number_value(
+            self.hass,
+            self.registry,
+            entity_key,
+            value,
+        )
 
     def get_select_options(
         self,
@@ -222,6 +273,24 @@ class SemSystemManager:
             return None
         return adapter.to_sem_option(entity_key, source_options)
 
+    async def async_after_select_option(
+        self,
+        entity_key: str,
+        sem_option: str,
+    ) -> None:
+        """Apply any adapter-specific action required by a SEM select."""
+        adapter = self.active_adapter
+        if adapter is None:
+            raise HomeAssistantError(
+                "No unambiguous SEM energy-system adapter is active"
+            )
+        await adapter.async_after_select_option(
+            self.hass,
+            self.registry,
+            entity_key,
+            sem_option,
+        )
+
     def get_runtime_diagnostics(self) -> dict[str, Any]:
         """Return provider-specific diagnostic data for the SEM status sensor."""
         adapter = self.active_adapter
@@ -245,6 +314,20 @@ class SemSystemManager:
         if adapter is None:
             return []
         return adapter.get_runtime_errors(
+            self.hass,
+            self.registry,
+            diagnostics,
+        )
+
+    def get_runtime_warnings(
+        self,
+        diagnostics: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Return non-blocking, actionable warnings from the active adapter."""
+        adapter = self.active_adapter
+        if adapter is None:
+            return []
+        return adapter.get_runtime_warnings(
             self.hass,
             self.registry,
             diagnostics,
