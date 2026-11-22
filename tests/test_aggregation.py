@@ -68,6 +68,17 @@ def test_single_and_multiple_source_values_are_summed() -> None:
     assert sum_numeric_values([1250, 875]) == 2125
 
 
+def test_battery_power_preserves_charge_and_discharge_signs() -> None:
+    # SolaX: positive means charging; negative means discharging.
+    assert sum_numeric_values([2500]) == 2500
+    assert sum_numeric_values([-1500]) == -1500
+
+    # Multiple battery inverters are combined as a signed net value.
+    assert sum_numeric_values([2500, -500]) == 2000
+    assert sum_numeric_values([-2500, 500]) == -2000
+    assert sum_numeric_values([2500, "unavailable"]) is None
+
+
 def test_sum_does_not_partially_aggregate_unavailable_sources() -> None:
     assert sum_numeric_values([1250, "unavailable"]) is None
     assert sum_numeric_values([]) is None
@@ -78,6 +89,14 @@ def test_plant_meter_duplicates_are_compared_not_summed() -> None:
     assert plant_meter_value([1000, 1050]) == 1025
     assert plant_meter_value([1000, 1800]) is None
     assert plant_meter_value([1000, "unavailable"]) is None
+
+
+def test_plant_meter_preserves_export_and_import_signs() -> None:
+    # SolaX reports export as positive and import as negative.
+    assert plant_meter_value([2500]) == 2500
+    assert plant_meter_value([-2500]) == -2500
+    assert plant_meter_value([2500, 2550]) == 2525
+    assert plant_meter_value([-2500, -2550]) == -2525
 
 
 def test_number_metadata_uses_intersection_of_physical_ranges() -> None:
