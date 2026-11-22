@@ -93,6 +93,10 @@ def test_multiple_missing_capacities_are_not_distributed() -> None:
     ) == 27.6
 
 
+def test_capacity_is_not_reported_without_discovered_batteries() -> None:
+    assert total_capacity_kwh({}, [], 13.8) is None
+
+
 def test_invalid_or_non_positive_helper_values_are_rejected() -> None:
     for value in (None, "unknown", "unavailable", 0, -1, float("nan")):
         assert complete_capacity_map({}, ["a"], value) is None
