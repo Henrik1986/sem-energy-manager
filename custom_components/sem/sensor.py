@@ -508,6 +508,19 @@ class SemSystemSensor(SemEntityProxyMixin, SensorEntity):
             self.source_states,
         )
 
+    @property
+    def available(self) -> bool:
+        """Allow rated capacity to be available through a configured fallback."""
+        if self._entity_key == "battery_rated_capacity":
+            return (
+                self._manager.get_sensor_value(
+                    self._entity_key,
+                    self.source_states,
+                )
+                is not None
+            )
+        return super().available
+
     def _update_from_source(self) -> None:
         """Mirror common measurement metadata from all physical sources."""
         attributes = [
