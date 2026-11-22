@@ -157,6 +157,9 @@ SOLAX_CAPACITY_SOURCE_KEYS = (
     "battery_install_capacity",
 )
 SOLAX_TOTAL_CAPACITY_HELPER = "input_number.sem_battery_total_capacity_kwh"
+SOLAX_BATTERY_DAY_CHARGE_FALLBACK_ENTITY = (
+    "sensor.sem_battery_charge_energy_daily"
+)
 
 SOLAX_GEN4_MODEL_PREFIXES = (
     "X1-HYBRID-",
@@ -1073,6 +1076,34 @@ class SolaXAdapter(SemSystemAdapter):
                 matches=matches,
                 expected_device_ids=expected_ids,
             )
+
+        # Prefer SolaX's native daily battery-charge sensor when it resolves
+        # for every battery inverter. Otherwise use SEM's local aggregate
+        # sensor, which derives the daily total from the battery power data.
+        if registry.get_entity_status(
+            self.system_id,
+            "battery_day_charge",
+        ) != "found":
+            fallback_state = hass.states.get(
+                SOLAX_BATTERY_DAY_CHARGE_FALLBACK_ENTITY
+            )
+            if fallback_state is not None:
+                registry.set_entity_result(
+                    self.system_id,
+                    "battery_day_charge",
+                    status="found",
+                    entity_id=SOLAX_BATTERY_DAY_CHARGE_FALLBACK_ENTITY,
+                    matches=[SOLAX_BATTERY_DAY_CHARGE_FALLBACK_ENTITY],
+                    sources=[
+                        EntitySource(
+                            entity_id=SOLAX_BATTERY_DAY_CHARGE_FALLBACK_ENTITY,
+                        )
+                    ],
+                )
+                _LOGGER.info(
+                    "SolaX resolver: using local fallback %s for battery_day_charge",
+                    SOLAX_BATTERY_DAY_CHARGE_FALLBACK_ENTITY,
+                )
 
         registry.set_capabilities(
             self.system_id,
