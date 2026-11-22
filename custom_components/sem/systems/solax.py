@@ -2518,8 +2518,15 @@ class SolaXAdapter(SemSystemAdapter):
                 [state.state for state in source_states if state is not None]
             )
 
+        if entity_key == "battery_charge_discharge_power":
+            # SolaX battery_power_charge is positive while charging and
+            # negative while discharging. Preserve the sign and sum the
+            # readings from every battery inverter, as the Huawei adapter does.
+            return sum_numeric_values(
+                state.state for state in source_states if state is not None
+            )
+
         if entity_key in {
-            "battery_charge_discharge_power",
             "battery_day_charge",
             "battery_day_discharge",
             "inverter_input_power",
