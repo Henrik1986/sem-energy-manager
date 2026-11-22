@@ -132,6 +132,13 @@ class SemSystemSelect(SemEntityProxyMixin, SelectEntity):
                 + "; ".join(failures)
             )
 
+        await self._manager.async_after_select_option(
+            self._entity_key,
+            option,
+        )
+        self._update_from_source()
+        self.async_write_ha_state()
+
     @property
     def extra_state_attributes(self) -> dict:
         """Expose every physical select entity."""
