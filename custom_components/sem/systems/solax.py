@@ -1457,7 +1457,7 @@ class SolaXAdapter(SemSystemAdapter):
         device_id: str,
         domain: str,
         source_key: str,
-    ) -> tuple[str, State]:
+    ) -> tuple[str, State | None]:
         """Find exactly one enabled SolaX control entity on an inverter device."""
         entity_registry = er.async_get(hass)
         matches = [
@@ -1483,9 +1483,7 @@ class SolaXAdapter(SemSystemAdapter):
             raise HomeAssistantError(
                 f"SolaX control entity {entity_id} is unavailable"
             )
-        if state is None:
-            # Button entities may not have a state until the first press.
-            state = State(entity_id, "unknown")
+        # Button entities may not have a state until the first press.
         return entity_id, state
 
     def _maximum_discharging_devices(
