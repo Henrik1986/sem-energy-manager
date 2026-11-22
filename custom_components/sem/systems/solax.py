@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 from collections import defaultdict
 from collections.abc import Mapping, Sequence
@@ -13,6 +14,7 @@ from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.storage import Store
 
 from .adapter import SemSystemAdapter
 from .huawei_aggregation import (
@@ -42,6 +44,15 @@ SOLAX_END_OF_DISCHARGE_SOC_SOURCE_KEYS = (
     "selfuse_discharge_min_soc",
     "feedin_discharge_min_soc",
 )
+SOLAX_GRID_CHARGE_MAXIMUM_POWER_KEY = "grid_charge_maximum_power"
+SOLAX_GRID_CHARGE_STORE_VERSION = 1
+SOLAX_GRID_CHARGE_NUMBER_METADATA = {
+    "min_value": 0,
+    "max_value": 100_000,
+    "step": 1,
+    "unit_of_measurement": "W",
+    "mode": "box",
+}
 
 # SEM registry key -> SolaX Modbus time entity unique-ID suffix.
 SOLAX_TOU_TIME_ENTITY_MAP = {
@@ -630,6 +641,10 @@ class SolaXAdapter(SemSystemAdapter):
     def __init__(self) -> None:
         self._hass: HomeAssistant | None = None
         self._registry: SemEntityRegistry | None = None
+        self._grid_charge_store: Store | None = None
+        self._grid_charge_value: float | None = None
+        self._grid_charge_override: dict[str, Any] | None = None
+        self._grid_charge_lock = asyncio.Lock()
 
     async def async_setup(
         self,
@@ -639,6 +654,19 @@ class SolaXAdapter(SemSystemAdapter):
         """Wait for SolaX, then resolve entities on the inverter devices."""
         self._hass = hass
         self._registry = registry
+        self._grid_charge_store = Store(
+            hass,
+            SOLAX_GRID_CHARGE_STORE_VERSION,
+            f"{SOLAX_SYSTEM_ID}_grid_charge_override",
+        )
+        stored_grid_charge = await self._grid_charge_store.async_load()
+        if isinstance(stored_grid_charge, Mapping):
+            stored_value = parse_numeric(stored_grid_charge.get("value"))
+            self._grid_charge_value = stored_value
+            stored_override = stored_grid_charge.get("override")
+            if isinstance(stored_override, dict):
+                self._grid_charge_override = stored_override
+
         entries = [
             entry
             for entry in hass.config_entries.async_entries(SOLAX_DOMAIN)
@@ -692,6 +720,17 @@ class SolaXAdapter(SemSystemAdapter):
         # Allow platform setup and entity-registry writes to complete.
         await asyncio.sleep(2)
         self._resolve_entities(hass, registry, loaded_entries)
+        if self._grid_charge_override is not None:
+            try:
+                await self._apply_grid_charge_override(
+                    hass,
+                    registry,
+                    self._grid_charge_override,
+                )
+            except HomeAssistantError:
+                _LOGGER.exception(
+                    "Could not reapply the saved SolaX grid-charge block"
+                )
 
     def _resolve_entities(
         self,
@@ -910,8 +949,7 @@ class SolaXAdapter(SemSystemAdapter):
             len(battery_device_ids),
         )
 
-    @staticmethod
-    def _build_capabilities(registry: SemEntityRegistry) -> dict[str, str]:
+    def _build_capabilities(self, registry: SemEntityRegistry) -> dict[str, str]:
         """Describe read availability and generation-specific write support."""
         capabilities = {
             f"read.{entity_key}": (
@@ -942,7 +980,11 @@ class SolaXAdapter(SemSystemAdapter):
                     ) == "found"
                     else "not_configured"
                 ),
-                "write.grid_charge_maximum_power": "not_supported",
+                "write.grid_charge_maximum_power": (
+                    "implemented"
+                    if self._grid_charge_override_supported()
+                    else "not_supported"
+                ),
                 "write.maximum_discharging_power": "not_supported",
                 "write.end_of_discharge_soc": (
                     "implemented"
@@ -957,6 +999,353 @@ class SolaXAdapter(SemSystemAdapter):
             }
         )
         return capabilities
+
+    def has_virtual_number(self, entity_key: str) -> bool:
+        """Expose grid-charge permission as a virtual SEM number on supported SolaX models."""
+        return (
+            entity_key == SOLAX_GRID_CHARGE_MAXIMUM_POWER_KEY
+            and self._grid_charge_override_supported()
+        )
+
+    def get_virtual_number_value(self, entity_key: str) -> float | None:
+        """Return the last requested SEM grid-charge value."""
+        if entity_key != SOLAX_GRID_CHARGE_MAXIMUM_POWER_KEY:
+            return None
+        return self._grid_charge_value
+
+    def get_virtual_number_metadata(self, entity_key: str) -> dict[str, Any]:
+        """Expose a watt-based number; SolaX uses zero/non-zero as permission."""
+        if entity_key != SOLAX_GRID_CHARGE_MAXIMUM_POWER_KEY:
+            return {}
+        return dict(SOLAX_GRID_CHARGE_NUMBER_METADATA)
+
+    async def async_set_number_value(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        entity_key: str,
+        value: float,
+    ) -> bool:
+        """Block SolaX grid charging at zero and restore its previous mode above zero."""
+        if entity_key != SOLAX_GRID_CHARGE_MAXIMUM_POWER_KEY:
+            return False
+        if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+            raise HomeAssistantError(
+                "SolaX grid-charge value must be a finite number greater than or equal to zero"
+            )
+        if not self._grid_charge_override_supported():
+            raise HomeAssistantError(
+                "SolaX grid-charge blocking is not supported by every detected battery inverter"
+            )
+
+        async with self._grid_charge_lock:
+            if value == 0:
+                if self._grid_charge_override is None:
+                    devices = self._grid_charge_devices(hass, registry)
+                    self._grid_charge_override = {
+                        "active": True,
+                        "devices": devices,
+                    }
+                self._grid_charge_value = 0
+                await self._save_grid_charge_state()
+                await self._apply_grid_charge_override(
+                    hass,
+                    registry,
+                    self._grid_charge_override,
+                )
+            else:
+                if self._grid_charge_override is not None:
+                    await self._restore_grid_charge_override(
+                        hass,
+                        registry,
+                        self._grid_charge_override,
+                    )
+                    self._grid_charge_override = None
+                self._grid_charge_value = float(value)
+                await self._save_grid_charge_state()
+
+        return True
+
+    def _grid_charge_override_supported(self) -> bool:
+        """Require a recognized generation and all entities needed to block grid charging."""
+        if self._hass is None or self._registry is None:
+            return False
+        try:
+            self._grid_charge_devices(self._hass, self._registry)
+        except HomeAssistantError:
+            return False
+        return True
+
+    def _grid_charge_devices(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+    ) -> list[dict[str, Any]]:
+        """Validate and describe every battery inverter participating in the override."""
+        if registry.get_entity_status(
+            self.system_id,
+            "battery_working_mode",
+        ) != "found":
+            raise HomeAssistantError(
+                "SolaX working-mode entities are not fully resolved"
+            )
+
+        mode_sources = registry.get_entity_sources(
+            self.system_id,
+            "battery_working_mode",
+        )
+        if not mode_sources:
+            raise HomeAssistantError(
+                "No SolaX battery working-mode entities were found"
+            )
+
+        device_ids = [source.device_id for source in mode_sources]
+        if any(device_id is None for device_id in device_ids):
+            raise HomeAssistantError(
+                "Every SolaX working-mode entity must belong to an inverter"
+            )
+        if len(set(device_ids)) != len(device_ids):
+            raise HomeAssistantError(
+                "SolaX working-mode sources contain duplicate inverter devices"
+            )
+
+        all_night_sources = self._night_charge_sources_by_device()
+        enabled_night_sources = self._night_charge_sources_by_device(
+            enabled_only=True
+        )
+        night_issues = self._night_charge_switch_issues()
+
+        devices = []
+        for source in mode_sources:
+            state = hass.states.get(source.entity_id)
+            if state is None or state.state in ("unknown", "unavailable"):
+                raise HomeAssistantError(
+                    f"SolaX working-mode entity {source.entity_id} is unavailable"
+                )
+
+            options = state.attributes.get("options", [])
+            generation = (
+                _detect_generation(options)
+                if isinstance(options, (list, tuple))
+                else None
+            )
+            if generation not in {"gen2", "gen3", "gen4_plus"}:
+                raise HomeAssistantError(
+                    f"Unsupported or unidentified SolaX generation for {source.entity_id}"
+                )
+            if "Self Use Mode" not in options:
+                raise HomeAssistantError(
+                    f"SolaX inverter {source.entity_id} does not expose Self Use Mode"
+                )
+
+            night_entity_id = None
+            previous_night_state = None
+            if generation == "gen4_plus":
+                if not self._is_gen4_or_gen5_device(source, options):
+                    device = (
+                        dr.async_get(hass).async_get(source.device_id)
+                        if source.device_id is not None
+                        else None
+                    )
+                    model = getattr(device, "model", None)
+                    raise HomeAssistantError(
+                        "Grid-charge blocking is not yet verified for SolaX Gen6 "
+                        f"or this Gen4/5 model: {model or source.entity_id}"
+                    )
+                if source.device_id in night_issues:
+                    raise HomeAssistantError(
+                        "SolaX Selfuse Night Charge is disabled or ambiguous. "
+                        "Enable exactly one switch for every Gen4/5 battery inverter."
+                    )
+                night_source = all_night_sources.get(source.device_id)
+                enabled_source = enabled_night_sources.get(source.device_id)
+                if night_source is None or enabled_source is None:
+                    raise HomeAssistantError(
+                        "SolaX Selfuse Night Charge is not resolved for every Gen4/5 inverter"
+                    )
+                night_state = hass.states.get(enabled_source.entity_id)
+                if night_state is None or night_state.state not in ("on", "off"):
+                    raise HomeAssistantError(
+                        f"SolaX night-charge switch {enabled_source.entity_id} is unavailable"
+                    )
+                night_entity_id = enabled_source.entity_id
+                previous_night_state = night_state.state
+
+            devices.append(
+                {
+                    "device_id": source.device_id,
+                    "mode_entity_id": source.entity_id,
+                    "previous_mode": state.state,
+                    "night_charge_entity_id": night_entity_id,
+                    "previous_night_charge_state": previous_night_state,
+                }
+            )
+
+        return devices
+
+    async def _save_grid_charge_state(self) -> None:
+        """Persist the requested value and restoration snapshot across restarts."""
+        if self._grid_charge_store is None:
+            return
+        await self._grid_charge_store.async_save(
+            {
+                "value": self._grid_charge_value,
+                "override": self._grid_charge_override,
+            }
+        )
+
+    @staticmethod
+    async def _call_select_options(
+        hass: HomeAssistant,
+        options_by_entity: Mapping[str, str],
+    ) -> None:
+        """Apply grouped select options only when the source differs."""
+        by_option: dict[str, list[str]] = defaultdict(list)
+        for entity_id, option in options_by_entity.items():
+            state = hass.states.get(entity_id)
+            if state is None or state.state in ("unknown", "unavailable"):
+                raise HomeAssistantError(
+                    f"SolaX working-mode entity {entity_id} is unavailable"
+                )
+            if state.state != option:
+                by_option[option].append(entity_id)
+
+        for option, entity_ids in by_option.items():
+            await hass.services.async_call(
+                "select",
+                "select_option",
+                {
+                    "entity_id": sorted(entity_ids),
+                    "option": option,
+                },
+                blocking=True,
+            )
+
+    @staticmethod
+    async def _call_switch_states(
+        hass: HomeAssistant,
+        states_by_entity: Mapping[str, str],
+    ) -> None:
+        """Apply grouped switch states only when the source differs."""
+        for target_state in ("off", "on"):
+            entity_ids = []
+            for entity_id, state_value in states_by_entity.items():
+                if state_value != target_state:
+                    continue
+                state = hass.states.get(entity_id)
+                if state is None or state.state not in ("on", "off"):
+                    raise HomeAssistantError(
+                        f"SolaX night-charge switch {entity_id} is unavailable"
+                    )
+                if state.state != target_state:
+                    entity_ids.append(entity_id)
+            if entity_ids:
+                await hass.services.async_call(
+                    "switch",
+                    "turn_on" if target_state == "on" else "turn_off",
+                    {"entity_id": sorted(entity_ids)},
+                    blocking=True,
+                )
+
+    async def _apply_grid_charge_override(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        override: dict[str, Any],
+    ) -> None:
+        """Temporarily use Self Use and disable Gen4/5 scheduled grid charging."""
+        current_devices = self._grid_charge_devices(hass, registry)
+        saved_devices = override.get("devices")
+        if not isinstance(saved_devices, list):
+            raise HomeAssistantError("Saved SolaX grid-charge state is invalid")
+
+        saved_by_device = {
+            item.get("device_id"): item
+            for item in saved_devices
+            if isinstance(item, dict) and item.get("device_id") is not None
+        }
+        current_by_device = {
+            item["device_id"]: item for item in current_devices
+        }
+        if set(saved_by_device) != set(current_by_device):
+            raise HomeAssistantError(
+                "The SolaX battery-inverter set changed while grid charging was blocked"
+            )
+
+        # Disable the Gen4/5 night-charge switch before changing working mode.
+        switch_targets = {
+            current_by_device[device_id]["night_charge_entity_id"]: "off"
+            for device_id in saved_by_device
+            if current_by_device[device_id]["night_charge_entity_id"] is not None
+        }
+        if switch_targets:
+            await self._call_switch_states(hass, switch_targets)
+
+        mode_targets = {
+            current_by_device[device_id]["mode_entity_id"]: "Self Use Mode"
+            for device_id in saved_by_device
+        }
+        await self._call_select_options(hass, mode_targets)
+
+    async def _restore_grid_charge_override(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        override: dict[str, Any],
+    ) -> None:
+        """Restore each prior mode and night-charge state without overwriting later manual changes."""
+        current_devices = self._grid_charge_devices(hass, registry)
+        saved_devices = override.get("devices")
+        if not isinstance(saved_devices, list):
+            raise HomeAssistantError("Saved SolaX grid-charge state is invalid")
+
+        saved_by_device = {
+            item.get("device_id"): item
+            for item in saved_devices
+            if isinstance(item, dict) and item.get("device_id") is not None
+        }
+        current_by_device = {
+            item["device_id"]: item for item in current_devices
+        }
+        if set(saved_by_device) != set(current_by_device):
+            raise HomeAssistantError(
+                "The SolaX battery-inverter set changed while grid charging was blocked"
+            )
+
+        mode_targets: dict[str, str] = {}
+        switch_targets: dict[str, str] = {}
+        for device_id, saved in saved_by_device.items():
+            current = current_by_device[device_id]
+            mode_state = hass.states.get(current["mode_entity_id"])
+            if mode_state is None or mode_state.state in ("unknown", "unavailable"):
+                raise HomeAssistantError(
+                    f"SolaX working-mode entity {current['mode_entity_id']} is unavailable"
+                )
+
+            # A different mode means the user or another automation changed it
+            # during the override. Do not overwrite that later decision.
+            if mode_state.state == "Self Use Mode":
+                previous_mode = saved.get("previous_mode")
+                if isinstance(previous_mode, str):
+                    mode_targets[current["mode_entity_id"]] = previous_mode
+
+            switch_entity_id = current["night_charge_entity_id"]
+            previous_switch_state = saved.get("previous_night_charge_state")
+            if switch_entity_id is not None and previous_switch_state in ("on", "off"):
+                switch_state = hass.states.get(switch_entity_id)
+                if switch_state is None or switch_state.state not in ("on", "off"):
+                    raise HomeAssistantError(
+                        f"SolaX night-charge switch {switch_entity_id} is unavailable"
+                    )
+                # Only restore a switch that is still in the state applied by
+                # this override; a later manual change is left untouched.
+                if switch_state.state == "off":
+                    switch_targets[switch_entity_id] = previous_switch_state
+
+        # Restore the working mode before re-enabling any scheduled charge.
+        await self._call_select_options(hass, mode_targets)
+        if switch_targets:
+            await self._call_switch_states(hass, switch_targets)
 
     def get_related_entity_ids(self, entity_key: str) -> list[str]:
         """Return auxiliary entities that affect a SEM entity's state."""
