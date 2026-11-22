@@ -83,6 +83,9 @@ def total_capacity_kwh(
     configured_total_kwh: Any,
 ) -> float | None:
     """Prefer a complete physical total; otherwise use the configured plant total."""
+    if not battery_device_ids:
+        return None
+
     complete = complete_capacity_map(
         physical_capacities_kwh,
         battery_device_ids,
