@@ -53,6 +53,22 @@ SOLAX_GRID_CHARGE_NUMBER_METADATA = {
     "unit_of_measurement": "W",
     "mode": "box",
 }
+SOLAX_MAXIMUM_DISCHARGING_POWER_KEY = "maximum_discharging_power"
+SOLAX_MAXIMUM_DISCHARGING_STORE_VERSION = 1
+SOLAX_MAXIMUM_DISCHARGING_NUMBER_METADATA = {
+    "min_value": 0,
+    "max_value": 100_000,
+    "step": 1,
+    "unit_of_measurement": "W",
+    "mode": "box",
+}
+SOLAX_GEN2_REMOTE_POWER_SETPOINT_SOURCE_KEY = "grid_export_limit"
+SOLAX_GEN4_REMOTE_CONTROL_MODE_SOURCE_KEY = "remotecontrol_power_control_mode"
+SOLAX_GEN4_REMOTE_CONTROL_TRIGGER_SOURCE_KEY = "powercontrolmode8_trigger"
+SOLAX_GEN4_AUTOREPEAT_DURATION_SOURCE_KEY = "remotecontrol_autorepeat_duration"
+SOLAX_GEN4_NO_DISCHARGE_MODE = "Enabled No Discharge"
+SOLAX_GEN4_DISABLED_MODE = "Disabled"
+SOLAX_GEN4_AUTOREPEAT_DURATION_SECONDS = 172_800
 
 # SEM registry key -> SolaX Modbus time entity unique-ID suffix.
 SOLAX_TOU_TIME_ENTITY_MAP = {
@@ -645,6 +661,9 @@ class SolaXAdapter(SemSystemAdapter):
         self._grid_charge_value: float | None = None
         self._grid_charge_override: dict[str, Any] | None = None
         self._grid_charge_lock = asyncio.Lock()
+        self._maximum_discharging_store: Store | None = None
+        self._maximum_discharging_value: float | None = None
+        self._maximum_discharging_override: dict[str, Any] | None = None
 
     async def async_setup(
         self,
@@ -666,6 +685,22 @@ class SolaXAdapter(SemSystemAdapter):
             stored_override = stored_grid_charge.get("override")
             if isinstance(stored_override, dict):
                 self._grid_charge_override = stored_override
+
+        self._maximum_discharging_store = Store(
+            hass,
+            SOLAX_MAXIMUM_DISCHARGING_STORE_VERSION,
+            f"{SOLAX_SYSTEM_ID}_maximum_discharging_override",
+        )
+        stored_maximum_discharging = (
+            await self._maximum_discharging_store.async_load()
+        )
+        if isinstance(stored_maximum_discharging, Mapping):
+            self._maximum_discharging_value = parse_numeric(
+                stored_maximum_discharging.get("value")
+            )
+            stored_override = stored_maximum_discharging.get("override")
+            if isinstance(stored_override, dict):
+                self._maximum_discharging_override = stored_override
 
         entries = [
             entry
@@ -730,6 +765,17 @@ class SolaXAdapter(SemSystemAdapter):
             except HomeAssistantError:
                 _LOGGER.exception(
                     "Could not reapply the saved SolaX grid-charge block"
+                )
+        if self._maximum_discharging_override is not None:
+            try:
+                await self._apply_maximum_discharging_override(
+                    hass,
+                    registry,
+                    self._maximum_discharging_override,
+                )
+            except HomeAssistantError:
+                _LOGGER.exception(
+                    "Could not reapply the saved SolaX no-discharge mode"
                 )
 
     def _resolve_entities(
@@ -985,7 +1031,11 @@ class SolaXAdapter(SemSystemAdapter):
                     if self._grid_charge_override_supported()
                     else "not_supported"
                 ),
-                "write.maximum_discharging_power": "not_supported",
+                "write.maximum_discharging_power": (
+                    "implemented"
+                    if self._maximum_discharging_override_supported()
+                    else "not_supported"
+                ),
                 "write.end_of_discharge_soc": (
                     "implemented"
                     if registry.get_entity_status(
@@ -1001,23 +1051,28 @@ class SolaXAdapter(SemSystemAdapter):
         return capabilities
 
     def has_virtual_number(self, entity_key: str) -> bool:
-        """Expose grid-charge permission as a virtual SEM number on supported SolaX models."""
-        return (
-            entity_key == SOLAX_GRID_CHARGE_MAXIMUM_POWER_KEY
-            and self._grid_charge_override_supported()
-        )
+        """Expose adapter-managed SolaX power permissions as virtual SEM numbers."""
+        if entity_key == SOLAX_GRID_CHARGE_MAXIMUM_POWER_KEY:
+            return self._grid_charge_override_supported()
+        if entity_key == SOLAX_MAXIMUM_DISCHARGING_POWER_KEY:
+            return self._maximum_discharging_override_supported()
+        return False
 
     def get_virtual_number_value(self, entity_key: str) -> float | None:
-        """Return the last requested SEM grid-charge value."""
-        if entity_key != SOLAX_GRID_CHARGE_MAXIMUM_POWER_KEY:
-            return None
-        return self._grid_charge_value
+        """Return the last requested value for an adapter-managed SolaX number."""
+        if entity_key == SOLAX_GRID_CHARGE_MAXIMUM_POWER_KEY:
+            return self._grid_charge_value
+        if entity_key == SOLAX_MAXIMUM_DISCHARGING_POWER_KEY:
+            return self._maximum_discharging_value
+        return None
 
     def get_virtual_number_metadata(self, entity_key: str) -> dict[str, Any]:
-        """Expose a watt-based number; SolaX uses zero/non-zero as permission."""
-        if entity_key != SOLAX_GRID_CHARGE_MAXIMUM_POWER_KEY:
-            return {}
-        return dict(SOLAX_GRID_CHARGE_NUMBER_METADATA)
+        """Expose watt-based values; SolaX uses zero/non-zero as permission."""
+        if entity_key == SOLAX_GRID_CHARGE_MAXIMUM_POWER_KEY:
+            return dict(SOLAX_GRID_CHARGE_NUMBER_METADATA)
+        if entity_key == SOLAX_MAXIMUM_DISCHARGING_POWER_KEY:
+            return dict(SOLAX_MAXIMUM_DISCHARGING_NUMBER_METADATA)
+        return {}
 
     async def async_set_number_value(
         self,
@@ -1026,43 +1081,81 @@ class SolaXAdapter(SemSystemAdapter):
         entity_key: str,
         value: float,
     ) -> bool:
-        """Block SolaX grid charging at zero and restore its previous mode above zero."""
-        if entity_key != SOLAX_GRID_CHARGE_MAXIMUM_POWER_KEY:
+        """Apply adapter-managed grid-charge and maximum-discharge permissions."""
+        if entity_key not in {
+            SOLAX_GRID_CHARGE_MAXIMUM_POWER_KEY,
+            SOLAX_MAXIMUM_DISCHARGING_POWER_KEY,
+        }:
             return False
-        if not isinstance(value, (int, float)) or not math.isfinite(value) or value < 0:
+        if (
+            not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
             raise HomeAssistantError(
-                "SolaX grid-charge value must be a finite number greater than or equal to zero"
-            )
-        if not self._grid_charge_override_supported():
-            raise HomeAssistantError(
-                "SolaX grid-charge blocking is not supported by every detected battery inverter"
+                f"SolaX value for {entity_key} must be a finite number greater than or equal to zero"
             )
 
         async with self._grid_charge_lock:
-            if value == 0:
-                if self._grid_charge_override is None:
-                    devices = self._grid_charge_devices(hass, registry)
-                    self._grid_charge_override = {
-                        "active": True,
-                        "devices": devices,
-                    }
-                self._grid_charge_value = 0
-                await self._save_grid_charge_state()
-                await self._apply_grid_charge_override(
-                    hass,
-                    registry,
-                    self._grid_charge_override,
-                )
-            else:
-                if self._grid_charge_override is not None:
-                    await self._restore_grid_charge_override(
+            if entity_key == SOLAX_GRID_CHARGE_MAXIMUM_POWER_KEY:
+                if not self._grid_charge_override_supported():
+                    raise HomeAssistantError(
+                        "SolaX grid-charge blocking is not supported by every detected battery inverter"
+                    )
+                if value == 0:
+                    if self._grid_charge_override is None:
+                        devices = self._grid_charge_devices(hass, registry)
+                        self._grid_charge_override = {
+                            "active": True,
+                            "devices": devices,
+                        }
+                    self._grid_charge_value = 0
+                    await self._save_grid_charge_state()
+                    await self._apply_grid_charge_override(
                         hass,
                         registry,
                         self._grid_charge_override,
                     )
-                    self._grid_charge_override = None
-                self._grid_charge_value = float(value)
-                await self._save_grid_charge_state()
+                else:
+                    if self._grid_charge_override is not None:
+                        await self._restore_grid_charge_override(
+                            hass,
+                            registry,
+                            self._grid_charge_override,
+                        )
+                        self._grid_charge_override = None
+                    self._grid_charge_value = float(value)
+                    await self._save_grid_charge_state()
+                return True
+
+            if not self._maximum_discharging_override_supported():
+                raise HomeAssistantError(
+                    "SolaX no-discharge control is not supported by every detected battery inverter"
+                )
+            if value == 0:
+                if self._maximum_discharging_override is None:
+                    devices = self._maximum_discharging_devices(hass, registry)
+                    self._maximum_discharging_override = {
+                        "active": True,
+                        "devices": devices,
+                    }
+                self._maximum_discharging_value = 0
+                await self._save_maximum_discharging_state()
+                await self._apply_maximum_discharging_override(
+                    hass,
+                    registry,
+                    self._maximum_discharging_override,
+                )
+            else:
+                if self._maximum_discharging_override is not None:
+                    await self._restore_maximum_discharging_override(
+                        hass,
+                        registry,
+                        self._maximum_discharging_override,
+                    )
+                    self._maximum_discharging_override = None
+                self._maximum_discharging_value = float(value)
+                await self._save_maximum_discharging_state()
 
         return True
 
@@ -1346,6 +1439,482 @@ class SolaXAdapter(SemSystemAdapter):
         await self._call_select_options(hass, mode_targets)
         if switch_targets:
             await self._call_switch_states(hass, switch_targets)
+
+    def _maximum_discharging_override_supported(self) -> bool:
+        """Require the generation-specific no-discharge controls on every battery inverter."""
+        if self._hass is None or self._registry is None:
+            return False
+        try:
+            self._maximum_discharging_devices(self._hass, self._registry)
+        except HomeAssistantError:
+            return False
+        return True
+
+    @staticmethod
+    def _find_inverter_control_entity(
+        hass: HomeAssistant,
+        *,
+        device_id: str,
+        domain: str,
+        source_key: str,
+    ) -> tuple[str, State]:
+        """Find exactly one enabled SolaX control entity on an inverter device."""
+        entity_registry = er.async_get(hass)
+        matches = [
+            entry
+            for entry in entity_registry.entities.values()
+            if entry.platform == SOLAX_DOMAIN
+            and entry.device_id == device_id
+            and entry.entity_id.startswith(f"{domain}.")
+            and _entity_key_matches(entry.unique_id, source_key)
+            and _disabled_by(entry) is None
+        ]
+        if len(matches) != 1:
+            raise HomeAssistantError(
+                f"SolaX control entity {source_key} must be enabled exactly once "
+                f"on inverter device {device_id}"
+            )
+
+        entity_id = matches[0].entity_id
+        state = hass.states.get(entity_id)
+        if domain != "button" and (
+            state is None or state.state in ("unknown", "unavailable")
+        ):
+            raise HomeAssistantError(
+                f"SolaX control entity {entity_id} is unavailable"
+            )
+        if state is None:
+            # Button entities may not have a state until the first press.
+            state = State(entity_id, "unknown")
+        return entity_id, state
+
+    def _maximum_discharging_devices(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+    ) -> list[dict[str, Any]]:
+        """Validate and describe the no-discharge controls for every battery inverter."""
+        if registry.get_entity_status(
+            self.system_id,
+            "battery_working_mode",
+        ) != "found":
+            raise HomeAssistantError(
+                "SolaX working-mode entities are not fully resolved"
+            )
+
+        mode_sources = registry.get_entity_sources(
+            self.system_id,
+            "battery_working_mode",
+        )
+        if not mode_sources:
+            raise HomeAssistantError(
+                "No SolaX battery working-mode entities were found"
+            )
+
+        device_ids = [source.device_id for source in mode_sources]
+        if any(device_id is None for device_id in device_ids):
+            raise HomeAssistantError(
+                "Every SolaX working-mode entity must belong to an inverter"
+            )
+        if len(set(device_ids)) != len(device_ids):
+            raise HomeAssistantError(
+                "SolaX working-mode sources contain duplicate inverter devices"
+            )
+
+        devices = []
+        for source in mode_sources:
+            state = hass.states.get(source.entity_id)
+            if state is None or state.state in ("unknown", "unavailable"):
+                raise HomeAssistantError(
+                    f"SolaX working-mode entity {source.entity_id} is unavailable"
+                )
+
+            options = state.attributes.get("options", [])
+            generation = (
+                _detect_generation(options)
+                if isinstance(options, (list, tuple))
+                else None
+            )
+            if generation not in {"gen2", "gen3", "gen4_plus"}:
+                raise HomeAssistantError(
+                    f"Unsupported or unidentified SolaX generation for {source.entity_id}"
+                )
+
+            device = {
+                "device_id": source.device_id,
+                "generation": generation,
+                "working_mode_entity_id": source.entity_id,
+                "previous_working_mode": state.state,
+            }
+
+            if generation == "gen2":
+                if "Back Up Mode" not in options:
+                    raise HomeAssistantError(
+                        f"SolaX Gen2 inverter {source.entity_id} does not expose Back Up Mode"
+                    )
+                setpoint_entity_id, setpoint_state = (
+                    self._find_inverter_control_entity(
+                        hass,
+                        device_id=source.device_id,
+                        domain="number",
+                        source_key=SOLAX_GEN2_REMOTE_POWER_SETPOINT_SOURCE_KEY,
+                    )
+                )
+                previous_setpoint = parse_numeric(setpoint_state.state)
+                if previous_setpoint is None:
+                    raise HomeAssistantError(
+                        f"SolaX Gen2 remote power setpoint {setpoint_entity_id} is not numeric"
+                    )
+                minimum = parse_numeric(setpoint_state.attributes.get("min"))
+                maximum = parse_numeric(setpoint_state.attributes.get("max"))
+                if (
+                    (minimum is not None and minimum > 0)
+                    or (maximum is not None and maximum < 0)
+                ):
+                    raise HomeAssistantError(
+                        f"SolaX Gen2 remote power setpoint {setpoint_entity_id} cannot accept 0 W"
+                    )
+                device.update(
+                    {
+                        "strategy": "gen2_remote_control",
+                        "remote_power_setpoint_entity_id": setpoint_entity_id,
+                        "previous_remote_power_setpoint": previous_setpoint,
+                    }
+                )
+            elif generation == "gen3":
+                if "Feedin Priority" not in options:
+                    raise HomeAssistantError(
+                        f"SolaX Gen3 inverter {source.entity_id} does not expose Feedin Priority"
+                    )
+                device["strategy"] = "gen3_feed_in_priority"
+            else:
+                control_entity_id, control_state = (
+                    self._find_inverter_control_entity(
+                        hass,
+                        device_id=source.device_id,
+                        domain="select",
+                        source_key=SOLAX_GEN4_REMOTE_CONTROL_MODE_SOURCE_KEY,
+                    )
+                )
+                control_options = control_state.attributes.get("options", [])
+                if not isinstance(control_options, (list, tuple)) or not {
+                    SOLAX_GEN4_DISABLED_MODE,
+                    SOLAX_GEN4_NO_DISCHARGE_MODE,
+                }.issubset(set(control_options)):
+                    raise HomeAssistantError(
+                        f"SolaX Mode 8 no-discharge option is unavailable on {control_entity_id}"
+                    )
+
+                trigger_entity_id, _ = self._find_inverter_control_entity(
+                    hass,
+                    device_id=source.device_id,
+                    domain="button",
+                    source_key=SOLAX_GEN4_REMOTE_CONTROL_TRIGGER_SOURCE_KEY,
+                )
+                duration_entity_id, duration_state = (
+                    self._find_inverter_control_entity(
+                        hass,
+                        device_id=source.device_id,
+                        domain="number",
+                        source_key=SOLAX_GEN4_AUTOREPEAT_DURATION_SOURCE_KEY,
+                    )
+                )
+                previous_duration = parse_numeric(duration_state.state)
+                if previous_duration is None:
+                    raise HomeAssistantError(
+                        f"SolaX autorepeat duration {duration_entity_id} is not numeric"
+                    )
+                maximum_duration = parse_numeric(
+                    duration_state.attributes.get("max")
+                )
+                if (
+                    maximum_duration is not None
+                    and maximum_duration
+                    < SOLAX_GEN4_AUTOREPEAT_DURATION_SECONDS
+                ):
+                    raise HomeAssistantError(
+                        f"SolaX autorepeat duration {duration_entity_id} cannot be set for 48 hours"
+                    )
+                device.update(
+                    {
+                        "strategy": "gen4_mode8",
+                        "remote_control_mode_entity_id": control_entity_id,
+                        "previous_remote_control_mode": control_state.state,
+                        "remote_control_trigger_entity_id": trigger_entity_id,
+                        "autorepeat_duration_entity_id": duration_entity_id,
+                        "previous_autorepeat_duration": previous_duration,
+                    }
+                )
+
+            devices.append(device)
+
+        return devices
+
+    async def _save_maximum_discharging_state(self) -> None:
+        """Persist the requested value and restoration snapshot across restarts."""
+        if self._maximum_discharging_store is None:
+            return
+        await self._maximum_discharging_store.async_save(
+            {
+                "value": self._maximum_discharging_value,
+                "override": self._maximum_discharging_override,
+            }
+        )
+
+    @staticmethod
+    async def _call_number_values(
+        hass: HomeAssistant,
+        values_by_entity: Mapping[str, float],
+    ) -> None:
+        """Set grouped number values, skipping entities already at the target."""
+        by_value: dict[float, list[str]] = defaultdict(list)
+        for entity_id, target_value in values_by_entity.items():
+            state = hass.states.get(entity_id)
+            current_value = (
+                parse_numeric(state.state)
+                if state is not None
+                and state.state not in ("unknown", "unavailable")
+                else None
+            )
+            if current_value is None:
+                raise HomeAssistantError(
+                    f"SolaX number entity {entity_id} is unavailable or non-numeric"
+                )
+            if not math.isclose(current_value, target_value, abs_tol=0.1):
+                by_value[target_value].append(entity_id)
+
+        for target_value, entity_ids in by_value.items():
+            await hass.services.async_call(
+                "number",
+                "set_value",
+                {
+                    "entity_id": sorted(entity_ids),
+                    "value": target_value,
+                },
+                blocking=True,
+            )
+
+    @staticmethod
+    async def _call_button_presses(
+        hass: HomeAssistant,
+        entity_ids: Sequence[str],
+    ) -> None:
+        """Press one or more SolaX control buttons."""
+        if entity_ids:
+            await hass.services.async_call(
+                "button",
+                "press",
+                {"entity_id": sorted(set(entity_ids))},
+                blocking=True,
+            )
+
+    async def _apply_maximum_discharging_override(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        override: dict[str, Any],
+    ) -> None:
+        """Apply each generation's native no-discharge control."""
+        current_devices = self._maximum_discharging_devices(hass, registry)
+        saved_devices = override.get("devices")
+        if not isinstance(saved_devices, list):
+            raise HomeAssistantError(
+                "Saved SolaX no-discharge state is invalid"
+            )
+
+        saved_by_device = {
+            item.get("device_id"): item
+            for item in saved_devices
+            if isinstance(item, dict) and item.get("device_id") is not None
+        }
+        current_by_device = {
+            item["device_id"]: item for item in current_devices
+        }
+        if set(saved_by_device) != set(current_by_device):
+            raise HomeAssistantError(
+                "The SolaX battery-inverter set changed while discharge was blocked"
+            )
+
+        number_targets: dict[str, float] = {}
+        working_mode_targets: dict[str, str] = {}
+        remote_control_mode_targets: dict[str, str] = {}
+        trigger_entity_ids = []
+
+        for device_id, current in current_by_device.items():
+            saved = saved_by_device[device_id]
+            strategy = saved.get("strategy")
+            if strategy == "gen2_remote_control":
+                number_targets[current["remote_power_setpoint_entity_id"]] = 0
+                working_mode_targets[
+                    current["working_mode_entity_id"]
+                ] = "Back Up Mode"
+            elif strategy == "gen3_feed_in_priority":
+                working_mode_targets[
+                    current["working_mode_entity_id"]
+                ] = "Feedin Priority"
+            elif strategy == "gen4_mode8":
+                number_targets[
+                    current["autorepeat_duration_entity_id"]
+                ] = SOLAX_GEN4_AUTOREPEAT_DURATION_SECONDS
+                remote_control_mode_targets[
+                    current["remote_control_mode_entity_id"]
+                ] = SOLAX_GEN4_NO_DISCHARGE_MODE
+                trigger_entity_ids.append(
+                    current["remote_control_trigger_entity_id"]
+                )
+            else:
+                raise HomeAssistantError(
+                    f"Unknown saved SolaX no-discharge strategy: {strategy!r}"
+                )
+
+        # Gen2 needs a neutral remote-power setpoint before Back Up Mode is selected.
+        # Gen4-6 need an active autorepeat window before the Mode 8 trigger is pressed.
+        await self._call_number_values(hass, number_targets)
+        await self._call_select_options(hass, working_mode_targets)
+        await self._call_select_options(hass, remote_control_mode_targets)
+        await self._call_button_presses(hass, trigger_entity_ids)
+
+    async def _restore_maximum_discharging_override(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        override: dict[str, Any],
+    ) -> None:
+        """Restore previous controls only when they are still in the state applied by SEM."""
+        current_devices = self._maximum_discharging_devices(hass, registry)
+        saved_devices = override.get("devices")
+        if not isinstance(saved_devices, list):
+            raise HomeAssistantError(
+                "Saved SolaX no-discharge state is invalid"
+            )
+
+        saved_by_device = {
+            item.get("device_id"): item
+            for item in saved_devices
+            if isinstance(item, dict) and item.get("device_id") is not None
+        }
+        current_by_device = {
+            item["device_id"]: item for item in current_devices
+        }
+        if set(saved_by_device) != set(current_by_device):
+            raise HomeAssistantError(
+                "The SolaX battery-inverter set changed while discharge was blocked"
+            )
+
+        working_mode_targets: dict[str, str] = {}
+        remote_control_mode_targets: dict[str, str] = {}
+        setpoint_targets: dict[str, float] = {}
+        autorepeat_targets: dict[str, float] = {}
+        trigger_entity_ids = []
+
+        for device_id, current in current_by_device.items():
+            saved = saved_by_device[device_id]
+            strategy = saved.get("strategy")
+
+            if strategy == "gen2_remote_control":
+                mode_state = hass.states.get(current["working_mode_entity_id"])
+                if mode_state is None or mode_state.state in ("unknown", "unavailable"):
+                    raise HomeAssistantError(
+                        f"SolaX working-mode entity {current['working_mode_entity_id']} is unavailable"
+                    )
+                if mode_state.state == "Back Up Mode":
+                    previous_mode = saved.get("previous_working_mode")
+                    if isinstance(previous_mode, str):
+                        working_mode_targets[
+                            current["working_mode_entity_id"]
+                        ] = previous_mode
+                    setpoint_state = hass.states.get(
+                        current["remote_power_setpoint_entity_id"]
+                    )
+                    current_setpoint = (
+                        parse_numeric(setpoint_state.state)
+                        if setpoint_state is not None
+                        else None
+                    )
+                    if current_setpoint is not None and math.isclose(
+                        current_setpoint,
+                        0,
+                        abs_tol=0.1,
+                    ):
+                        previous_setpoint = parse_numeric(
+                            saved.get("previous_remote_power_setpoint")
+                        )
+                        if previous_setpoint is not None:
+                            setpoint_targets[
+                                current["remote_power_setpoint_entity_id"]
+                            ] = previous_setpoint
+
+            elif strategy == "gen3_feed_in_priority":
+                mode_state = hass.states.get(current["working_mode_entity_id"])
+                if mode_state is None or mode_state.state in ("unknown", "unavailable"):
+                    raise HomeAssistantError(
+                        f"SolaX working-mode entity {current['working_mode_entity_id']} is unavailable"
+                    )
+                if mode_state.state == "Feedin Priority":
+                    previous_mode = saved.get("previous_working_mode")
+                    if isinstance(previous_mode, str):
+                        working_mode_targets[
+                            current["working_mode_entity_id"]
+                        ] = previous_mode
+
+            elif strategy == "gen4_mode8":
+                control_state = hass.states.get(
+                    current["remote_control_mode_entity_id"]
+                )
+                if (
+                    control_state is None
+                    or control_state.state in ("unknown", "unavailable")
+                ):
+                    raise HomeAssistantError(
+                        f"SolaX remote-control mode {current['remote_control_mode_entity_id']} is unavailable"
+                    )
+                if control_state.state == SOLAX_GEN4_NO_DISCHARGE_MODE:
+                    previous_control_mode = saved.get(
+                        "previous_remote_control_mode"
+                    )
+                    if isinstance(previous_control_mode, str):
+                        remote_control_mode_targets[
+                            current["remote_control_mode_entity_id"]
+                        ] = previous_control_mode
+                        trigger_entity_ids.append(
+                            current["remote_control_trigger_entity_id"]
+                        )
+
+                duration_state = hass.states.get(
+                    current["autorepeat_duration_entity_id"]
+                )
+                current_duration = (
+                    parse_numeric(duration_state.state)
+                    if duration_state is not None
+                    else None
+                )
+                if (
+                    current_duration is not None
+                    and math.isclose(
+                        current_duration,
+                        SOLAX_GEN4_AUTOREPEAT_DURATION_SECONDS,
+                        abs_tol=0.1,
+                    )
+                ):
+                    previous_duration = parse_numeric(
+                        saved.get("previous_autorepeat_duration")
+                    )
+                    if previous_duration is not None:
+                        autorepeat_targets[
+                            current["autorepeat_duration_entity_id"]
+                        ] = previous_duration
+            else:
+                raise HomeAssistantError(
+                    f"Unknown saved SolaX no-discharge strategy: {strategy!r}"
+                )
+
+        await self._call_select_options(hass, working_mode_targets)
+        await self._call_select_options(hass, remote_control_mode_targets)
+        await self._call_button_presses(hass, trigger_entity_ids)
+        # Restore the Gen2 setpoint after leaving Back Up Mode and the Gen4-6
+        # repeat duration after the prior remote-control mode has been restored.
+        await self._call_number_values(hass, setpoint_targets)
+        await self._call_number_values(hass, autorepeat_targets)
 
     def get_related_entity_ids(self, entity_key: str) -> list[str]:
         """Return auxiliary entities that affect a SEM entity's state."""
