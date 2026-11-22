@@ -2908,6 +2908,95 @@ class SolaXAdapter(SemSystemAdapter):
                 )
             return
 
+        if command == "reset_grid_export_power_limit":
+            export_sources = registry.get_entity_sources(
+                self.system_id,
+                SOLAX_GRID_EXPORT_POWER_LIMIT_KEY,
+            )
+            device_ids = sorted({
+                source.device_id
+                for source in export_sources
+                if source.device_id is not None
+            })
+            if (
+                registry.get_entity_status(
+                    self.system_id,
+                    SOLAX_GRID_EXPORT_POWER_LIMIT_KEY,
+                ) != "found"
+                or not export_sources
+                or any(source.device_id is None for source in export_sources)
+                or len(device_ids) != len(export_sources)
+            ):
+                raise HomeAssistantError(
+                    "SolaX export-control limit entities are not fully resolved"
+                )
+
+            entity_ids = self._require_sources_by_device(
+                hass,
+                registry,
+                entity_key=SOLAX_GRID_EXPORT_POWER_LIMIT_KEY,
+                domain="number",
+                device_ids=device_ids,
+            )
+
+            # Restore each inverter to its own allowed maximum. The number
+            # entity exposes the effective model/configuration-specific limit
+            # through its Home Assistant "max" state attribute.
+            targets_by_limit: dict[float, list[str]] = defaultdict(list)
+            for entity_id in entity_ids:
+                state = hass.states.get(entity_id)
+                maximum = (
+                    parse_numeric(state.attributes.get("max"))
+                    if state is not None
+                    else None
+                )
+                if maximum is None or maximum < 0:
+                    raise HomeAssistantError(
+                        f"SolaX export-control entity {entity_id} has no valid "
+                        "maximum value in its 'max' attribute"
+                    )
+
+                current_value = (
+                    parse_numeric(state.state) if state is not None else None
+                )
+                if current_value is None or not math.isclose(
+                    current_value,
+                    maximum,
+                    rel_tol=0.0,
+                    abs_tol=1e-6,
+                ):
+                    targets_by_limit[maximum].append(entity_id)
+
+            if targets_by_limit:
+                if not hass.services.has_service("number", "set_value"):
+                    raise HomeAssistantError(
+                        "Home Assistant number.set_value service is not available"
+                    )
+
+                results = await asyncio.gather(
+                    *(
+                        hass.services.async_call(
+                            "number",
+                            "set_value",
+                            {"entity_id": targets, "value": maximum},
+                            blocking=True,
+                        )
+                        for maximum, targets in sorted(targets_by_limit.items())
+                    ),
+                    return_exceptions=True,
+                )
+                failures = [
+                    str(result)
+                    for result in results
+                    if isinstance(result, Exception)
+                ]
+                if failures:
+                    raise HomeAssistantError(
+                        "SolaX grid export power limit reset failed: "
+                        + "; ".join(failures)
+                    )
+            return
+
         if command != "set_battery_time_of_use_periods":
             raise HomeAssistantError(
                 f"Unsupported SEM command for SolaX: {command}"
