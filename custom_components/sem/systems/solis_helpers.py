@@ -38,6 +38,11 @@ SOLIS_TOTAL_CAPACITY_HELPER = "input_number.sem_battery_total_capacity_kwh"
 SOLIS_GRID_CHARGE_MAXIMUM_POWER_ENTITY_KEY = "grid_charge_maximum_power"
 SOLIS_GRID_CHARGE_NO_GRID_SOURCE_OPTION = "Timed Charge/Discharge - No Grid Charging"
 
+SOLIS_GRID_EXPORT_POWER_LIMIT_ENTITY_KEY = "grid_export_power_limit"
+SOLIS_GRID_EXPORT_POWER_SWITCH_ENTITY_KEY = "grid_export_power_limit_switch"
+SOLIS_BACKFLOW_POWER_SOURCE_KEY = "backflow_power"
+SOLIS_BACKFLOW_POWER_SWITCH_SOURCE_KEY = "backflow_power_switch"
+
 def sum_solis_pv_power(values: Sequence[object]) -> float | None:
     """Sum one valid non-negative PV power reading per Solis inverter."""
     if not values:
@@ -127,6 +132,28 @@ def solis_grid_charge_blocked_option(sem_option: str) -> str | None:
     if sem_option == "time_of_use":
         return SOLIS_GRID_CHARGE_NO_GRID_SOURCE_OPTION
     return SOLIS_MODE_TO_SOURCE_OPTION.get(sem_option)
+
+def solis_backflow_power_switch_option(
+    current_option: object,
+    *,
+    enabled: bool,
+) -> str | None:
+    """Preserve the Solis output mode while toggling backflow power control."""
+    if not isinstance(current_option, str):
+        return None
+
+    if current_option in {"On", "Off"}:
+        return "On" if enabled else "Off"
+
+    if current_option.startswith("On & "):
+        suffix = current_option[2:]
+    elif current_option.startswith("Off & "):
+        suffix = current_option[3:]
+    else:
+        return None
+
+    return ("On" if enabled else "Off") + suffix
+
 
 SOLIS_TOU_NUMBER_FIELDS = (
     "timed_charge_start_hours",

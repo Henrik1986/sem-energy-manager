@@ -26,6 +26,10 @@ from .solis_helpers import (
     SOLIS_BATTERY_POWER_SOURCE_KEYS,
     SOLIS_BATTERY_CHARGE_POWER_SOURCE_KEY,
     SOLIS_BATTERY_DISCHARGE_POWER_SOURCE_KEY,
+    SOLIS_GRID_EXPORT_POWER_LIMIT_ENTITY_KEY,
+    SOLIS_GRID_EXPORT_POWER_SWITCH_ENTITY_KEY,
+    SOLIS_BACKFLOW_POWER_SOURCE_KEY,
+    SOLIS_BACKFLOW_POWER_SWITCH_SOURCE_KEY,
     SOLIS_POWER_METER_ENTITY_KEY,
     SOLIS_POWER_METER_SOURCE_KEY,
     SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY,
@@ -46,6 +50,7 @@ from .solis_helpers import (
     solis_grid_charge_blocked_option,
     solis_battery_soc_value,
     solis_battery_power_value,
+    solis_backflow_power_switch_option,
     solis_total_capacity_kwh,
     sum_solis_pv_power,
 )
@@ -58,6 +63,7 @@ SOLIS_MANUFACTURER = "Ginlog Solis"
 SOLIS_SUPPORTED_PLUGINS = frozenset({"solis"})
 SOLIS_GRID_CHARGE_MAXIMUM_POWER_KEY = SOLIS_GRID_CHARGE_MAXIMUM_POWER_ENTITY_KEY
 SOLIS_GRID_CHARGE_STORE_VERSION = 1
+SOLIS_GRID_EXPORT_POWER_STORE_VERSION = 1
 SOLIS_GRID_CHARGE_NUMBER_METADATA = {
     "min_value": 0,
     "max_value": 100_000,
@@ -83,6 +89,8 @@ SOLIS_ENTITY_KEYS = (
     SOLIS_BATTERY_POWER_ENTITY_KEY,
     SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY,
     SOLIS_POWER_METER_ENTITY_KEY,
+    SOLIS_GRID_EXPORT_POWER_LIMIT_ENTITY_KEY,
+    SOLIS_GRID_EXPORT_POWER_SWITCH_ENTITY_KEY,
     SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY,
     SOLIS_MAXIMUM_DISCHARGING_CURRENT_ENTITY_KEY,
     SOLIS_BATTERY_VOLTAGE_ENTITY_KEY,
@@ -116,6 +124,16 @@ SOLIS_CAPABILITIES = SystemCapabilities(
             required=True,
             readable=True,
             writable=False,
+        ),
+        SOLIS_GRID_EXPORT_POWER_LIMIT_ENTITY_KEY: EntityCapability(
+            required=False,
+            readable=True,
+            writable=True,
+        ),
+        SOLIS_GRID_EXPORT_POWER_SWITCH_ENTITY_KEY: EntityCapability(
+            required=False,
+            readable=True,
+            writable=True,
         ),
         SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY: EntityCapability(
             required=False,
@@ -159,8 +177,23 @@ SOLIS_CAPABILITIES = SystemCapabilities(
             )
         },
     },
-    commands=frozenset({"set_battery_time_of_use_periods"}),
+    commands=frozenset({
+        "set_battery_time_of_use_periods",
+        "set_grid_export_power_limit",
+        "reset_grid_export_power_limit",
+    }),
 )
+
+
+def _finite_numeric(value: Any) -> float | None:
+    """Return a finite numeric value, excluding booleans and invalid states."""
+    if isinstance(value, bool):
+        return None
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError):
+        return None
+    return numeric if math.isfinite(numeric) else None
 
 
 def _entry_plugin(entry: Any) -> str:
@@ -500,6 +533,9 @@ class SolisAdapter(SemSystemAdapter):
         self._maximum_discharging_power_store: Store | None = None
         self._maximum_discharging_power_value: float | None = None
         self._maximum_discharging_power_lock = asyncio.Lock()
+        self._grid_export_power_store: Store | None = None
+        self._grid_export_power_override: dict[str, dict[str, Any]] | None = None
+        self._grid_export_power_lock = asyncio.Lock()
 
     async def async_setup(
         self,
@@ -549,6 +585,33 @@ class SolisAdapter(SemSystemAdapter):
                 and stored_value >= 0
             ):
                 self._maximum_discharging_power_value = stored_value
+
+        self._grid_export_power_store = Store(
+            hass,
+            SOLIS_GRID_EXPORT_POWER_STORE_VERSION,
+            f"{SOLIS_SYSTEM_ID}_grid_export_power_override",
+        )
+        stored_grid_export = await self._grid_export_power_store.async_load()
+        if isinstance(stored_grid_export, Mapping):
+            stored_devices = stored_grid_export.get("devices")
+            if isinstance(stored_devices, Mapping):
+                restored_devices: dict[str, dict[str, Any]] = {}
+                for device_id, stored_values in stored_devices.items():
+                    if not isinstance(stored_values, Mapping):
+                        continue
+                    original_power = _finite_numeric(stored_values.get("power"))
+                    original_switch = stored_values.get("switch")
+                    if (
+                        original_power is not None
+                        and original_power >= 0
+                        and isinstance(original_switch, str)
+                    ):
+                        restored_devices[str(device_id)] = {
+                            "power": original_power,
+                            "switch": original_switch,
+                        }
+                if restored_devices:
+                    self._grid_export_power_override = restored_devices
 
         entries = [
             entry
@@ -751,6 +814,40 @@ class SolisAdapter(SemSystemAdapter):
             matches=battery_power_matches,
             expected_device_ids=battery_device_ids,
             source_keys=SOLIS_BATTERY_POWER_SOURCE_KEYS,
+        )
+
+        export_limit_matches = [
+            entry
+            for entry in entity_entries
+            if entry.domain == "number"
+            and _entity_key_matches(
+                entry.unique_id,
+                SOLIS_BACKFLOW_POWER_SOURCE_KEY,
+            )
+        ]
+        _resolve_expected_sources(
+            registry,
+            device_registry,
+            entity_key=SOLIS_GRID_EXPORT_POWER_LIMIT_ENTITY_KEY,
+            matches=export_limit_matches,
+            expected_device_ids=inverter_device_ids,
+        )
+
+        export_switch_matches = [
+            entry
+            for entry in entity_entries
+            if entry.domain == "select"
+            and _entity_key_matches(
+                entry.unique_id,
+                SOLIS_BACKFLOW_POWER_SWITCH_SOURCE_KEY,
+            )
+        ]
+        _resolve_expected_sources(
+            registry,
+            device_registry,
+            entity_key=SOLIS_GRID_EXPORT_POWER_SWITCH_ENTITY_KEY,
+            matches=export_switch_matches,
+            expected_device_ids=inverter_device_ids,
         )
 
         # PV production is measured once per inverter, including units without
@@ -1808,6 +1905,360 @@ class SolisAdapter(SemSystemAdapter):
 
         return entities_by_device
 
+    def _grid_export_device_entities(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+    ) -> tuple[list[str], dict[str, str], dict[str, str]]:
+        """Return complete Backflow Power and switch entities per inverter."""
+        limit_sources = registry.get_entity_sources(
+            self.system_id,
+            SOLIS_GRID_EXPORT_POWER_LIMIT_ENTITY_KEY,
+        )
+        device_ids = sorted(
+            source.device_id
+            for source in limit_sources
+            if source.device_id is not None
+        )
+        if (
+            registry.get_entity_status(
+                self.system_id,
+                SOLIS_GRID_EXPORT_POWER_LIMIT_ENTITY_KEY,
+            ) != "found"
+            or not limit_sources
+            or any(source.device_id is None for source in limit_sources)
+            or len(device_ids) != len(limit_sources)
+        ):
+            raise HomeAssistantError(
+                "Solis Backflow Power number entities are not fully resolved"
+            )
+
+        number_entities = self._require_device_entities(
+            hass,
+            registry,
+            entity_key=SOLIS_GRID_EXPORT_POWER_LIMIT_ENTITY_KEY,
+            domain="number",
+            device_ids=device_ids,
+        )
+        switch_entities = self._require_device_entities(
+            hass,
+            registry,
+            entity_key=SOLIS_GRID_EXPORT_POWER_SWITCH_ENTITY_KEY,
+            domain="select",
+            device_ids=device_ids,
+        )
+        return device_ids, number_entities, switch_entities
+
+    async def _save_grid_export_power_override(self) -> None:
+        """Persist the original per-inverter export settings until reset."""
+        if self._grid_export_power_store is None:
+            return
+        await self._grid_export_power_store.async_save(
+            {"devices": self._grid_export_power_override or {}}
+        )
+
+    async def _apply_grid_export_device_states(
+        self,
+        hass: HomeAssistant,
+        number_entities: Mapping[str, str],
+        switch_entities: Mapping[str, str],
+        values_by_device: Mapping[str, Mapping[str, Any]],
+    ) -> None:
+        """Apply one Backflow Power value and switch option to each inverter."""
+        if not hass.services.has_service("number", "set_value"):
+            raise HomeAssistantError(
+                "Home Assistant number.set_value service is not available"
+            )
+        if not hass.services.has_service("select", "select_option"):
+            raise HomeAssistantError(
+                "Home Assistant select.select_option service is not available"
+            )
+
+        # Write the target power before enabling/disabling the EPM switch.
+        for device_id in sorted(values_by_device):
+            entity_id = number_entities.get(device_id)
+            state = hass.states.get(entity_id) if entity_id is not None else None
+            target_power = _finite_numeric(values_by_device[device_id].get("power"))
+            current_power = _finite_numeric(state.state) if state is not None else None
+            if target_power is None or current_power is None:
+                raise HomeAssistantError(
+                    f"Solis Backflow Power is unavailable for inverter {device_id}"
+                )
+            if not math.isclose(
+                current_power,
+                target_power,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            ):
+                await hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": entity_id, "value": target_power},
+                    blocking=True,
+                )
+
+        for device_id in sorted(values_by_device):
+            entity_id = switch_entities.get(device_id)
+            state = hass.states.get(entity_id) if entity_id is not None else None
+            target_option = values_by_device[device_id].get("switch")
+            options = state.attributes.get("options", []) if state is not None else []
+            if (
+                state is None
+                or state.state in ("unknown", "unavailable")
+                or not isinstance(target_option, str)
+                or target_option not in options
+            ):
+                raise HomeAssistantError(
+                    f"Solis Backflow Power Switch target is unavailable for inverter {device_id}"
+                )
+            if state.state != target_option:
+                await hass.services.async_call(
+                    "select",
+                    "select_option",
+                    {"entity_id": entity_id, "option": target_option},
+                    blocking=True,
+                )
+
+    async def _execute_grid_export_power_limit(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        data: Mapping[str, Any],
+    ) -> None:
+        """Set an export ceiling and enable Solis Backflow Power control."""
+        raw_power = data.get("power")
+        power = _finite_numeric(raw_power)
+        if power is None or power < 0:
+            raise HomeAssistantError(
+                "Solis grid export power limit must be a finite number greater than or equal to zero"
+            )
+
+        async with self._grid_export_power_lock:
+            device_ids, number_entities, switch_entities = (
+                self._grid_export_device_entities(hass, registry)
+            )
+            if not hass.services.has_service("number", "set_value"):
+                raise HomeAssistantError(
+                    "Home Assistant number.set_value service is not available"
+                )
+            if not hass.services.has_service("select", "select_option"):
+                raise HomeAssistantError(
+                    "Home Assistant select.select_option service is not available"
+                )
+
+            rollback_values: dict[str, dict[str, Any]] = {}
+            target_values: dict[str, dict[str, Any]] = {}
+            for device_id in device_ids:
+                number_state = hass.states.get(number_entities[device_id])
+                switch_state = hass.states.get(switch_entities[device_id])
+                current_power = (
+                    _finite_numeric(number_state.state)
+                    if number_state is not None
+                    else None
+                )
+                minimum = (
+                    _finite_numeric(number_state.attributes.get("min"))
+                    if number_state is not None
+                    else None
+                )
+                maximum = (
+                    _finite_numeric(number_state.attributes.get("max"))
+                    if number_state is not None
+                    else None
+                )
+                step = (
+                    _finite_numeric(number_state.attributes.get("step"))
+                    if number_state is not None
+                    else None
+                )
+                if (
+                    current_power is None
+                    or minimum is None
+                    or maximum is None
+                    or step is None
+                    or step <= 0
+                    or power < minimum - 1e-6
+                    or power > maximum + 1e-6
+                ):
+                    raise HomeAssistantError(
+                        f"Solis Backflow Power range is unavailable or does not support {power:g} W on inverter {device_id}"
+                    )
+                step_count = (power - minimum) / step
+                if not math.isclose(
+                    step_count,
+                    round(step_count),
+                    rel_tol=0.0,
+                    abs_tol=1e-6,
+                ):
+                    raise HomeAssistantError(
+                        f"Solis Backflow Power on inverter {device_id} must use {step:g} W increments"
+                    )
+
+                if (
+                    switch_state is None
+                    or switch_state.state in ("unknown", "unavailable")
+                ):
+                    raise HomeAssistantError(
+                        f"Solis Backflow Power Switch is unavailable on inverter {device_id}"
+                    )
+                options = switch_state.attributes.get("options", [])
+                enabled_option = solis_backflow_power_switch_option(
+                    switch_state.state,
+                    enabled=True,
+                )
+                if enabled_option is None or enabled_option not in options:
+                    raise HomeAssistantError(
+                        f"Solis Backflow Power Switch option is unsupported on inverter {device_id}"
+                    )
+
+                rollback_values[device_id] = {
+                    "power": current_power,
+                    "switch": switch_state.state,
+                }
+                target_values[device_id] = {
+                    "power": power,
+                    "switch": enabled_option,
+                }
+
+            existing_override = self._grid_export_power_override
+            if existing_override is not None:
+                if set(existing_override) != set(device_ids):
+                    raise HomeAssistantError(
+                        "Solis inverter configuration changed while an SEM export limit is active; reset the saved limit before continuing"
+                    )
+                original_values = {
+                    device_id: dict(values)
+                    for device_id, values in existing_override.items()
+                }
+            else:
+                original_values = {
+                    device_id: dict(values)
+                    for device_id, values in rollback_values.items()
+                }
+                self._grid_export_power_override = original_values
+                await self._save_grid_export_power_override()
+
+            try:
+                await self._apply_grid_export_device_states(
+                    hass,
+                    number_entities,
+                    switch_entities,
+                    target_values,
+                )
+            except Exception as err:
+                try:
+                    await self._apply_grid_export_device_states(
+                        hass,
+                        number_entities,
+                        switch_entities,
+                        rollback_values,
+                    )
+                except Exception:
+                    _LOGGER.exception(
+                        "Could not fully roll back Solis export settings after a failed limit update"
+                    )
+                else:
+                    if existing_override is None:
+                        self._grid_export_power_override = None
+                        await self._save_grid_export_power_override()
+                raise HomeAssistantError(
+                    f"Could not apply Solis grid export power limit: {err}"
+                ) from err
+
+            self._grid_export_power_override = original_values
+            _LOGGER.info(
+                "Applied SEM Solis grid export limit of %s W to %d inverter(s)",
+                power,
+                len(device_ids),
+            )
+
+    async def _execute_reset_grid_export_power_limit(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+    ) -> None:
+        """Restore the inverter export settings captured before SEM limited export."""
+        async with self._grid_export_power_lock:
+            original_values = self._grid_export_power_override
+            if not original_values:
+                _LOGGER.debug(
+                    "No saved SEM Solis export override exists; nothing to reset"
+                )
+                return
+
+            device_ids, number_entities, switch_entities = (
+                self._grid_export_device_entities(hass, registry)
+            )
+            if set(device_ids) != set(original_values):
+                raise HomeAssistantError(
+                    "Solis inverter configuration changed while an SEM export limit is active; restore the original inverter configuration before resetting"
+                )
+
+            rollback_values: dict[str, dict[str, Any]] = {}
+            for device_id in device_ids:
+                number_state = hass.states.get(number_entities[device_id])
+                switch_state = hass.states.get(switch_entities[device_id])
+                current_power = (
+                    _finite_numeric(number_state.state)
+                    if number_state is not None
+                    else None
+                )
+                if (
+                    current_power is None
+                    or switch_state is None
+                    or switch_state.state in ("unknown", "unavailable")
+                ):
+                    raise HomeAssistantError(
+                        f"Current Solis export settings are unavailable on inverter {device_id}"
+                    )
+                original_switch = original_values[device_id].get("switch")
+                original_power = _finite_numeric(
+                    original_values[device_id].get("power")
+                )
+                options = switch_state.attributes.get("options", [])
+                if (
+                    original_power is None
+                    or not isinstance(original_switch, str)
+                    or original_switch not in options
+                ):
+                    raise HomeAssistantError(
+                        f"Saved Solis export settings are invalid for inverter {device_id}"
+                    )
+                rollback_values[device_id] = {
+                    "power": current_power,
+                    "switch": switch_state.state,
+                }
+
+            try:
+                await self._apply_grid_export_device_states(
+                    hass,
+                    number_entities,
+                    switch_entities,
+                    original_values,
+                )
+            except Exception as err:
+                try:
+                    await self._apply_grid_export_device_states(
+                        hass,
+                        number_entities,
+                        switch_entities,
+                        rollback_values,
+                    )
+                except Exception:
+                    _LOGGER.exception(
+                        "Could not fully roll back Solis export settings after a failed reset"
+                    )
+                raise HomeAssistantError(
+                    f"Could not restore original Solis export settings: {err}"
+                ) from err
+
+            self._grid_export_power_override = None
+            await self._save_grid_export_power_override()
+            _LOGGER.info(
+                "Restored original Solis export settings on %d inverter(s)",
+                len(device_ids),
+            )
+
     async def async_execute(
         self,
         hass: HomeAssistant,
@@ -1815,7 +2266,22 @@ class SolisAdapter(SemSystemAdapter):
         command: str,
         data: dict[str, Any],
     ) -> None:
-        """Write SEM TOU periods into Solis local time values and device registers."""
+        """Execute SEM export-control and time-of-use commands for Solis."""
+        if command == "set_grid_export_power_limit":
+            await self._execute_grid_export_power_limit(
+                hass,
+                registry,
+                data,
+            )
+            return
+
+        if command == "reset_grid_export_power_limit":
+            await self._execute_reset_grid_export_power_limit(
+                hass,
+                registry,
+            )
+            return
+
         if command != "set_battery_time_of_use_periods":
             raise HomeAssistantError(
                 f"Unsupported SEM command for Solis: {command}"

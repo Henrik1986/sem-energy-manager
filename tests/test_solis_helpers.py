@@ -27,6 +27,11 @@ SOLIS_BATTERY_DISCHARGE_POWER_SOURCE_KEY = (
     solis_helpers.SOLIS_BATTERY_DISCHARGE_POWER_SOURCE_KEY
 )
 solis_battery_power_value = solis_helpers.solis_battery_power_value
+solis_backflow_power_switch_option = solis_helpers.solis_backflow_power_switch_option
+SOLIS_GRID_EXPORT_POWER_LIMIT_ENTITY_KEY = solis_helpers.SOLIS_GRID_EXPORT_POWER_LIMIT_ENTITY_KEY
+SOLIS_GRID_EXPORT_POWER_SWITCH_ENTITY_KEY = solis_helpers.SOLIS_GRID_EXPORT_POWER_SWITCH_ENTITY_KEY
+SOLIS_BACKFLOW_POWER_SOURCE_KEY = solis_helpers.SOLIS_BACKFLOW_POWER_SOURCE_KEY
+SOLIS_BACKFLOW_POWER_SWITCH_SOURCE_KEY = solis_helpers.SOLIS_BACKFLOW_POWER_SWITCH_SOURCE_KEY
 SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY = solis_helpers.SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY
 SOLIS_POWER_METER_ENTITY_KEY = solis_helpers.SOLIS_POWER_METER_ENTITY_KEY
 SOLIS_POWER_METER_SOURCE_KEY = solis_helpers.SOLIS_POWER_METER_SOURCE_KEY
@@ -104,6 +109,29 @@ def test_solis_battery_power_rejects_incomplete_or_invalid_readings() -> None:
             charge_values,
             discharge_values,
         ) is None
+
+
+def test_grid_export_limit_maps_to_backflow_power_register_entities() -> None:
+    assert SOLIS_GRID_EXPORT_POWER_LIMIT_ENTITY_KEY == "grid_export_power_limit"
+    assert SOLIS_GRID_EXPORT_POWER_SWITCH_ENTITY_KEY == "grid_export_power_limit_switch"
+    assert SOLIS_BACKFLOW_POWER_SOURCE_KEY == "backflow_power"
+    assert SOLIS_BACKFLOW_POWER_SWITCH_SOURCE_KEY == "backflow_power_switch"
+
+
+def test_backflow_switch_option_preserves_x1_and_x3_output_modes() -> None:
+    assert solis_backflow_power_switch_option("Off", enabled=True) == "On"
+    assert solis_backflow_power_switch_option("On", enabled=False) == "Off"
+    assert solis_backflow_power_switch_option(
+        "Off & Balanced output", enabled=True
+    ) == "On & Balanced output"
+    assert solis_backflow_power_switch_option(
+        "On & Unbalanced output", enabled=False
+    ) == "Off & Unbalanced output"
+
+
+def test_backflow_switch_option_rejects_unknown_options() -> None:
+    assert solis_backflow_power_switch_option("unknown", enabled=True) is None
+    assert solis_backflow_power_switch_option(None, enabled=False) is None
 
 
 def test_solis_pv_power_sums_all_inverter_readings() -> None:
