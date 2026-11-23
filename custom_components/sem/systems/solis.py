@@ -15,6 +15,8 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 
+from .aggregation import plant_meter_value
+
 
 from .adapter import SemSystemAdapter
 from .capabilities import EntityCapability, SystemCapabilities
@@ -74,6 +76,7 @@ SOLIS_ENTITY_KEYS = (
     "battery_working_mode",
     SOLIS_BATTERY_SOC_ENTITY_KEY,
     SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY,
+    SOLIS_POWER_METER_ENTITY_KEY,
     SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY,
     SOLIS_MAXIMUM_DISCHARGING_CURRENT_ENTITY_KEY,
     SOLIS_BATTERY_VOLTAGE_ENTITY_KEY,
@@ -94,6 +97,11 @@ SOLIS_CAPABILITIES = SystemCapabilities(
             writable=False,
         ),
         SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY: EntityCapability(
+            required=True,
+            readable=True,
+            writable=False,
+        ),
+        SOLIS_POWER_METER_ENTITY_KEY: EntityCapability(
             required=True,
             readable=True,
             writable=False,
@@ -303,6 +311,59 @@ def _resolve_expected_sources(
         device_id=sources[0].device_id if sources else None,
         config_entry_id=sources[0].config_entry_id if sources else None,
         matches=[entry.entity_id for entry in all_matches],
+        sources=sources,
+    )
+
+
+
+def _resolve_any_sources(
+    registry: SemEntityRegistry,
+    device_registry: dr.DeviceRegistry,
+    *,
+    entity_key: str,
+    matches: Sequence[Any],
+) -> None:
+    """Resolve plant-level sources without requiring one meter per inverter."""
+    active_by_device: dict[str, list[Any]] = defaultdict(list)
+    disabled: list[Any] = []
+
+    for entry in matches:
+        if _disabled_by(entry) is None:
+            active_by_device[str(entry.device_id)].append(entry)
+        else:
+            disabled.append(entry)
+
+    duplicates = any(len(entries) > 1 for entries in active_by_device.values())
+    active = [
+        entry
+        for device_id in sorted(active_by_device)
+        for entry in active_by_device[device_id]
+    ]
+
+    if duplicates:
+        status = "ambiguous"
+        selected = active
+    elif active:
+        status = "found"
+        selected = active
+    elif disabled:
+        status = "disabled"
+        selected = disabled
+    else:
+        status = "missing"
+        selected = []
+
+    sources = [_source_from_entry(entry, device_registry) for entry in selected]
+    registry.set_entity_result(
+        SOLIS_SYSTEM_ID,
+        entity_key,
+        status=status,
+        entity_id=sources[0].entity_id if sources else None,
+        unique_id=sources[0].unique_id if sources else None,
+        platform=SOLIS_DOMAIN if sources else None,
+        device_id=sources[0].device_id if sources else None,
+        config_entry_id=sources[0].config_entry_id if sources else None,
+        matches=[entry.entity_id for entry in active + disabled],
         sources=sources,
     )
 
@@ -574,6 +635,22 @@ class SolisAdapter(SemSystemAdapter):
             expected_device_ids=inverter_device_ids,
         )
 
+        meter_power_matches = [
+            entry
+            for entry in entity_entries
+            if entry.domain == "sensor"
+            and _entity_key_matches(
+                entry.unique_id,
+                SOLIS_POWER_METER_SOURCE_KEY,
+            )
+        ]
+        _resolve_any_sources(
+            registry,
+            device_registry,
+            entity_key=SOLIS_POWER_METER_ENTITY_KEY,
+            matches=meter_power_matches,
+        )
+
     def get_sensor_value(
         self,
         entity_key: str,
@@ -587,6 +664,40 @@ class SolisAdapter(SemSystemAdapter):
             if helper_state is None:
                 return None
             return solis_total_capacity_kwh(helper_state.state)
+
+        if entity_key == SOLIS_POWER_METER_ENTITY_KEY:
+            if not source_states or any(
+                state is None or state.state in ("unknown", "unavailable")
+                for state in source_states
+            ):
+                return None
+
+            if (
+                self._registry is None
+                or self._registry.get_entity_status(
+                    self.system_id,
+                    SOLIS_POWER_METER_ENTITY_KEY,
+                ) != "found"
+            ):
+                return None
+
+            sources = self._registry.get_entity_sources(
+                self.system_id,
+                SOLIS_POWER_METER_ENTITY_KEY,
+            )
+            device_ids = [source.device_id for source in sources]
+            if (
+                len(sources) != len(source_states)
+                or any(device_id is None for device_id in device_ids)
+                or len(set(device_ids)) != len(device_ids)
+            ):
+                return None
+
+            # Solis register 33130: positive is export; negative is import.
+            # Multiple inverters may mirror the same plant meter reading.
+            return plant_meter_value(
+                [state.state for state in source_states if state is not None]
+            )
 
         if entity_key == SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY:
             if not source_states or any(
@@ -678,6 +789,13 @@ class SolisAdapter(SemSystemAdapter):
                 "suggested_display_precision": 2,
             }
         if entity_key == SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY:
+            return {
+                "device_class": "power",
+                "state_class": "measurement",
+                "unit_of_measurement": "W",
+                "suggested_display_precision": 0,
+            }
+        if entity_key == SOLIS_POWER_METER_ENTITY_KEY:
             return {
                 "device_class": "power",
                 "state_class": "measurement",

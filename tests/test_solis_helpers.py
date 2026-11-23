@@ -19,6 +19,8 @@ SPEC.loader.exec_module(solis_helpers)
 
 SOLIS_BATTERY_SOC_ENTITY_KEY = solis_helpers.SOLIS_BATTERY_SOC_ENTITY_KEY
 SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY = solis_helpers.SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY
+SOLIS_POWER_METER_ENTITY_KEY = solis_helpers.SOLIS_POWER_METER_ENTITY_KEY
+SOLIS_POWER_METER_SOURCE_KEY = solis_helpers.SOLIS_POWER_METER_SOURCE_KEY
 SOLIS_INVERTER_INPUT_POWER_SOURCE_KEY = solis_helpers.SOLIS_INVERTER_INPUT_POWER_SOURCE_KEY
 sum_solis_pv_power = solis_helpers.sum_solis_pv_power
 SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY = (
@@ -48,6 +50,11 @@ build_solis_discharge_current_values = (
     solis_helpers.build_solis_discharge_current_values
 )
 parse_solis_tou_periods = solis_helpers.parse_solis_tou_periods
+
+
+def test_power_meter_maps_to_standard_solis_meter_sensor() -> None:
+    assert SOLIS_POWER_METER_ENTITY_KEY == "power_meter_active_power"
+    assert SOLIS_POWER_METER_SOURCE_KEY == "meter_active_power"
 
 
 def test_inverter_input_power_maps_to_pv_total_power_per_inverter() -> None:

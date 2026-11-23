@@ -23,6 +23,8 @@ SOLIS_BATTERY_SOC_ENTITY_KEY = "battery_state_of_capacity"
 SOLIS_BATTERY_SOC_SOURCE_KEY = "battery_soc"
 SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY = "inverter_input_power"
 SOLIS_INVERTER_INPUT_POWER_SOURCE_KEY = "pv_total_power"
+SOLIS_POWER_METER_ENTITY_KEY = "power_meter_active_power"
+SOLIS_POWER_METER_SOURCE_KEY = "meter_active_power"
 SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY = "battery_rated_capacity"
 SOLIS_TOTAL_CAPACITY_HELPER = "input_number.sem_battery_total_capacity_kwh"
 
