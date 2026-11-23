@@ -15,10 +15,8 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 
-from .aggregation import plant_meter_value
-
-
 from .adapter import SemSystemAdapter
+from .aggregation import plant_meter_value
 from .capabilities import EntityCapability, SystemCapabilities
 from .registry import EntitySource, SemEntityRegistry
 from .solis_helpers import (
@@ -313,7 +311,6 @@ def _resolve_expected_sources(
         matches=[entry.entity_id for entry in all_matches],
         sources=sources,
     )
-
 
 
 def _resolve_any_sources(
