@@ -52,6 +52,7 @@ class SemEntityProxyMixin:
         self._registry = manager.registry
         self._entity_key = entity_key
         self._source_entity_ids: list[str] = []
+        self._listener_entity_ids: list[str] = []
         self._source_unsub = None
 
         self._attr_has_entity_name = False
@@ -96,15 +97,25 @@ class SemEntityProxyMixin:
     def _refresh_source_listener(self) -> None:
         """Follow all source entities resolved by the SEM registry."""
         entity_ids = self._manager.get_entity_ids(self._entity_key)
-        if entity_ids == self._source_entity_ids:
+        listener_ids = sorted(
+            set(
+                entity_ids
+                + self._manager.get_related_entity_ids(self._entity_key)
+            )
+        )
+        if (
+            entity_ids == self._source_entity_ids
+            and listener_ids == self._listener_entity_ids
+        ):
             return
 
         self._remove_source_listener()
         self._source_entity_ids = entity_ids
-        if entity_ids:
+        self._listener_entity_ids = listener_ids
+        if listener_ids:
             self._source_unsub = async_track_state_change_event(
                 self.hass,
-                entity_ids,
+                listener_ids,
                 self._handle_source_state_change,
             )
 

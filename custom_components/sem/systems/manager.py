@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
 
 from .adapter import SemSystemAdapter
+from .capabilities import SystemCapabilities
 from .registry import SemEntityRegistry
 
 _LOGGER = logging.getLogger(__name__)
@@ -58,6 +59,36 @@ class SemSystemManager:
         system_id = self.registry.get_active_system_id()
         return self._adapters.get(system_id) if system_id is not None else None
 
+    @property
+    def capabilities(self) -> SystemCapabilities | None:
+        """Return the active system's declared capabilities."""
+        adapter = self.active_adapter
+        return adapter.capabilities if adapter is not None else None
+
+    def is_entity_readable(self, entity_key: str) -> bool:
+        """Return whether the active adapter exposes readable data."""
+        capabilities = self.capabilities
+        return (
+            capabilities is not None
+            and capabilities.can_read_entity(entity_key)
+        )
+
+    def is_entity_writable(self, entity_key: str) -> bool:
+        """Return whether the active adapter supports writes for an entity."""
+        capabilities = self.capabilities
+        return (
+            capabilities is not None
+            and capabilities.can_write_entity(entity_key)
+        )
+
+    def supports_command(self, command: str) -> bool:
+        """Return whether the active adapter implements a SEM command."""
+        capabilities = self.capabilities
+        return (
+            capabilities is not None
+            and capabilities.supports_command(command)
+        )
+
     def get_entity_ids(self, entity_key: str) -> list[str]:
         """Return all active source entity IDs for a logical SEM entity."""
         adapter = self.active_adapter
@@ -65,8 +96,16 @@ class SemSystemManager:
             return []
         return self.registry.get_entity_ids(adapter.system_id, entity_key)
 
+    def get_related_entity_ids(self, entity_key: str) -> list[str]:
+        """Return auxiliary source IDs used to derive a SEM entity state."""
+        adapter = self.active_adapter
+        if adapter is None:
+            return []
+        return adapter.get_related_entity_ids(entity_key)
+
     def get_entity_id(self, entity_key: str) -> str | None:
         """Return the first source entity ID for backwards compatibility."""
+
         entity_ids = self.get_entity_ids(entity_key)
         return entity_ids[0] if entity_ids else None
 
@@ -92,7 +131,7 @@ class SemSystemManager:
     def get_sensor_value(self, entity_key: str, source_states=None):
         """Return an aggregated sensor value from every physical source."""
         adapter = self.active_adapter
-        if adapter is None:
+        if adapter is None or not self.is_entity_readable(entity_key):
             return None
         states = (
             list(source_states)
@@ -108,7 +147,7 @@ class SemSystemManager:
     ) -> dict[str, Any]:
         """Return common measurement metadata from all source entities."""
         adapter = self.active_adapter
-        if adapter is None:
+        if adapter is None or not self.is_entity_readable(entity_key):
             return {}
         if source_attributes is None:
             states = self.get_entity_states(entity_key)
@@ -124,8 +163,10 @@ class SemSystemManager:
     ) -> float | None:
         """Return a shared number value from all physical sources."""
         adapter = self.active_adapter
-        if adapter is None:
+        if adapter is None or not self.is_entity_readable(entity_key):
             return None
+        if adapter.has_virtual_number(entity_key):
+            return adapter.get_virtual_number_value(entity_key)
         states = (
             list(source_states)
             if source_states is not None
@@ -140,7 +181,7 @@ class SemSystemManager:
     ) -> dict[str, Any]:
         """Return the common number range across all physical sources."""
         adapter = self.active_adapter
-        if adapter is None:
+        if adapter is None or not self.is_entity_readable(entity_key):
             return {}
         if source_attributes is None:
             states = self.get_entity_states(entity_key)
@@ -148,6 +189,47 @@ class SemSystemManager:
                 state.attributes for state in states if state is not None
             ]
         return adapter.get_number_metadata(entity_key, source_attributes)
+
+    def has_virtual_number(self, entity_key: str) -> bool:
+        """Return whether the active adapter owns this number entity."""
+        adapter = self.active_adapter
+        return adapter is not None and adapter.has_virtual_number(entity_key)
+
+    def get_virtual_number_value(self, entity_key: str) -> float | None:
+        """Return the active adapter's virtual number value."""
+        adapter = self.active_adapter
+        if adapter is None or not adapter.has_virtual_number(entity_key):
+            return None
+        return adapter.get_virtual_number_value(entity_key)
+
+    def get_virtual_number_metadata(self, entity_key: str) -> dict[str, Any]:
+        """Return metadata for the active adapter's virtual number."""
+        adapter = self.active_adapter
+        if adapter is None or not adapter.has_virtual_number(entity_key):
+            return {}
+        return adapter.get_virtual_number_metadata(entity_key)
+
+    async def async_set_number_value(
+        self,
+        entity_key: str,
+        value: float,
+    ) -> bool:
+        """Give the active adapter the first opportunity to handle a number write."""
+        adapter = self.active_adapter
+        if adapter is None:
+            raise HomeAssistantError(
+                "No unambiguous SEM energy-system adapter is active"
+            )
+        if not self.is_entity_writable(entity_key):
+            raise HomeAssistantError(
+                f"SEM entity {entity_key} does not support writes"
+            )
+        return await adapter.async_set_number_value(
+            self.hass,
+            self.registry,
+            entity_key,
+            value,
+        )
 
     def get_select_options(
         self,
@@ -158,7 +240,7 @@ class SemSystemManager:
         adapter = self.active_adapter
         return (
             adapter.get_sem_options(entity_key, source_options)
-            if adapter is not None
+            if adapter is not None and self.is_entity_readable(entity_key)
             else []
         )
 
@@ -172,6 +254,8 @@ class SemSystemManager:
         adapter = self.active_adapter
         if adapter is None:
             raise ValueError("No unambiguous SEM energy system is active")
+        if not self.is_entity_writable(entity_key):
+            raise ValueError(f"SEM entity {entity_key} does not support writes")
         return adapter.to_source_options(
             entity_key,
             sem_option,
@@ -189,12 +273,65 @@ class SemSystemManager:
             return None
         return adapter.to_sem_option(entity_key, source_options)
 
+    async def async_after_select_option(
+        self,
+        entity_key: str,
+        sem_option: str,
+    ) -> None:
+        """Apply any adapter-specific action required by a SEM select."""
+        adapter = self.active_adapter
+        if adapter is None:
+            raise HomeAssistantError(
+                "No unambiguous SEM energy-system adapter is active"
+            )
+        await adapter.async_after_select_option(
+            self.hass,
+            self.registry,
+            entity_key,
+            sem_option,
+        )
+
     def get_runtime_diagnostics(self) -> dict[str, Any]:
-        """Return live adapter warnings for the SEM status sensor."""
+        """Return provider-specific diagnostic data for the SEM status sensor."""
         adapter = self.active_adapter
         if adapter is None:
             return {}
         return adapter.get_runtime_diagnostics(self.hass, self.registry)
+
+    def get_setup_errors(self) -> list[dict[str, Any]]:
+        """Return actionable setup errors from the active adapter."""
+        adapter = self.active_adapter
+        if adapter is None:
+            return []
+        return adapter.get_setup_errors(self.hass, self.registry)
+
+    def get_runtime_errors(
+        self,
+        diagnostics: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Return actionable runtime errors from the active adapter."""
+        adapter = self.active_adapter
+        if adapter is None:
+            return []
+        return adapter.get_runtime_errors(
+            self.hass,
+            self.registry,
+            diagnostics,
+        )
+
+    def get_runtime_warnings(
+        self,
+        diagnostics: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Return non-blocking, actionable warnings from the active adapter."""
+        adapter = self.active_adapter
+        if adapter is None:
+            return []
+        return adapter.get_runtime_warnings(
+            self.hass,
+            self.registry,
+            diagnostics,
+        )
 
     async def async_execute(
         self,
@@ -206,6 +343,11 @@ class SemSystemManager:
         if adapter is None:
             raise HomeAssistantError(
                 "No unambiguous SEM energy-system adapter is active"
+            )
+        if not self.supports_command(command):
+            raise HomeAssistantError(
+                f"SEM command is not supported by adapter {adapter.system_id}: "
+                f"{command}"
             )
         _LOGGER.debug(
             "Executing SEM command %s through adapter %s",

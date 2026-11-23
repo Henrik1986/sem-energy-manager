@@ -63,10 +63,19 @@ class SemSystemSelect(SemEntityProxyMixin, SelectEntity):
     @property
     def available(self) -> bool:
         """Require all source devices and a common selectable option."""
-        return super().available and bool(self._attr_options)
+        return (
+            super().available
+            and self._manager.is_entity_readable(self._entity_key)
+            and self._manager.is_entity_writable(self._entity_key)
+            and bool(self._attr_options)
+        )
 
     async def async_select_option(self, option: str) -> None:
         """Validate and mirror a selected option to every battery."""
+        if not self._manager.is_entity_writable(self._entity_key):
+            raise HomeAssistantError(
+                f"SEM entity {self._entity_key} does not support writes"
+            )
         if not self.available:
             raise HomeAssistantError(
                 f"The source entities for {self._entity_key} are unavailable"
@@ -122,6 +131,13 @@ class SemSystemSelect(SemEntityProxyMixin, SelectEntity):
                 "The selection could not be applied to every battery: "
                 + "; ".join(failures)
             )
+
+        await self._manager.async_after_select_option(
+            self._entity_key,
+            option,
+        )
+        self._update_from_source()
+        self.async_write_ha_state()
 
     @property
     def extra_state_attributes(self) -> dict:

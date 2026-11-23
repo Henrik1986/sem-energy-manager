@@ -1,4 +1,4 @@
-"""Pure aggregation helpers for Huawei multi-inverter systems."""
+"""Provider-independent aggregation and validation helpers for SEM."""
 
 from __future__ import annotations
 
@@ -60,18 +60,18 @@ def capacity_weighted_soc(
     return weighted_sum / total_capacity
 
 
-def group_sources_by_inverter(
+def group_sources_by_owner(
     sources: Sequence[Any],
 ) -> dict[str, list[Any]]:
-    """Group physical sources by their owning inverter, not by daisy-chain root."""
+    """Group sources by their owning device, falling back to their own device ID."""
     grouped: dict[str, list[Any]] = defaultdict(list)
     for source in sources:
-        inverter_id = (
+        owner_id = (
             getattr(source, "owner_device_id", None)
             or getattr(source, "device_id", None)
         )
-        if inverter_id is not None:
-            grouped[inverter_id].append(source)
+        if owner_id is not None:
+            grouped[owner_id].append(source)
     return dict(sorted(grouped.items()))
 
 

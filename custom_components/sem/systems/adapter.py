@@ -8,6 +8,7 @@ from typing import Any
 
 from homeassistant.core import HomeAssistant, State
 
+from .capabilities import SystemCapabilities
 from .registry import SemEntityRegistry
 
 
@@ -16,6 +17,11 @@ class SemSystemAdapter(ABC):
 
     system_id: str
     integration_domain: str
+
+    @property
+    def capabilities(self) -> SystemCapabilities:
+        """Return the entities and commands supported by this adapter."""
+        return SystemCapabilities()
 
     @abstractmethod
     async def async_setup(
@@ -125,6 +131,28 @@ class SemSystemAdapter(ABC):
             "mode": next(iter(modes)),
         }
 
+    def has_virtual_number(self, entity_key: str) -> bool:
+        """Return whether this adapter provides a number without a physical source."""
+        return False
+
+    def get_virtual_number_value(self, entity_key: str) -> float | None:
+        """Return the current value for an adapter-managed virtual number."""
+        return None
+
+    def get_virtual_number_metadata(self, entity_key: str) -> dict[str, Any]:
+        """Return number metadata for an adapter-managed virtual number."""
+        return {}
+
+    async def async_set_number_value(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        entity_key: str,
+        value: float,
+    ) -> bool:
+        """Handle an adapter-managed number; return False for ordinary proxies."""
+        return False
+
     def get_sem_options(
         self,
         entity_key: str,
@@ -167,13 +195,52 @@ class SemSystemAdapter(ABC):
         first = source_options[0]
         return first if all(option == first for option in source_options) else None
 
+    def get_related_entity_ids(self, entity_key: str) -> list[str]:
+        """Return additional entities whose state affects a SEM entity."""
+        return []
+
+    async def async_after_select_option(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        entity_key: str,
+        sem_option: str,
+    ) -> None:
+        """Apply adapter-specific side effects after a SEM select changes."""
+
+    def get_runtime_warnings(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        diagnostics: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Return non-blocking, actionable warnings from adapter diagnostics."""
+        return []
+
     def get_runtime_diagnostics(
         self,
         hass: HomeAssistant,
         registry: SemEntityRegistry,
     ) -> dict[str, Any]:
-        """Return live warnings about mismatched physical source values."""
+        """Return provider-specific diagnostic data for the status sensor."""
         return {}
+
+    def get_setup_errors(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+    ) -> list[dict[str, Any]]:
+        """Return actionable setup errors in the shared SEM error format."""
+        return []
+
+    def get_runtime_errors(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        diagnostics: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Return actionable runtime errors in the shared SEM error format."""
+        return []
 
     @abstractmethod
     async def async_execute(

@@ -1,4 +1,4 @@
-"""Unit tests for the pure Huawei aggregation helpers."""
+"""Unit tests for provider-independent SEM aggregation helpers."""
 
 from __future__ import annotations
 
@@ -11,20 +11,20 @@ MODULE_PATH = (
     / "custom_components"
     / "sem"
     / "systems"
-    / "huawei_aggregation.py"
+    / "aggregation.py"
 )
-SPEC = importlib.util.spec_from_file_location("huawei_aggregation", MODULE_PATH)
+SPEC = importlib.util.spec_from_file_location("aggregation", MODULE_PATH)
 assert SPEC is not None and SPEC.loader is not None
-huawei_aggregation = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(huawei_aggregation)
+aggregation = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(aggregation)
 
-capacity_weighted_soc = huawei_aggregation.capacity_weighted_soc
-common_number_metadata = huawei_aggregation.common_number_metadata
-common_sem_options = huawei_aggregation.common_sem_options
-group_sources_by_inverter = huawei_aggregation.group_sources_by_inverter
-plant_meter_value = huawei_aggregation.plant_meter_value
-sum_numeric_values = huawei_aggregation.sum_numeric_values
-value_fits_number_metadata = huawei_aggregation.value_fits_number_metadata
+capacity_weighted_soc = aggregation.capacity_weighted_soc
+common_number_metadata = aggregation.common_number_metadata
+common_sem_options = aggregation.common_sem_options
+group_sources_by_owner = aggregation.group_sources_by_owner
+plant_meter_value = aggregation.plant_meter_value
+sum_numeric_values = aggregation.sum_numeric_values
+value_fits_number_metadata = aggregation.value_fits_number_metadata
 
 
 def test_single_battery_soc_is_unchanged() -> None:
@@ -68,6 +68,17 @@ def test_single_and_multiple_source_values_are_summed() -> None:
     assert sum_numeric_values([1250, 875]) == 2125
 
 
+def test_battery_power_preserves_charge_and_discharge_signs() -> None:
+    # SolaX: positive means charging; negative means discharging.
+    assert sum_numeric_values([2500]) == 2500
+    assert sum_numeric_values([-1500]) == -1500
+
+    # Multiple battery inverters are combined as a signed net value.
+    assert sum_numeric_values([2500, -500]) == 2000
+    assert sum_numeric_values([-2500, 500]) == -2000
+    assert sum_numeric_values([2500, "unavailable"]) is None
+
+
 def test_sum_does_not_partially_aggregate_unavailable_sources() -> None:
     assert sum_numeric_values([1250, "unavailable"]) is None
     assert sum_numeric_values([]) is None
@@ -78,6 +89,14 @@ def test_plant_meter_duplicates_are_compared_not_summed() -> None:
     assert plant_meter_value([1000, 1050]) == 1025
     assert plant_meter_value([1000, 1800]) is None
     assert plant_meter_value([1000, "unavailable"]) is None
+
+
+def test_plant_meter_preserves_export_and_import_signs() -> None:
+    # SolaX reports export as positive and import as negative.
+    assert plant_meter_value([2500]) == 2500
+    assert plant_meter_value([-2500]) == -2500
+    assert plant_meter_value([2500, 2550]) == 2525
+    assert plant_meter_value([-2500, -2550]) == -2525
 
 
 def test_number_metadata_uses_intersection_of_physical_ranges() -> None:
@@ -145,7 +164,7 @@ def test_select_options_are_intersected_and_translated() -> None:
     assert result == ["self_consumption"]
 
 
-def test_sources_group_by_physical_inverter_not_master_root() -> None:
+def test_sources_group_by_owner_not_root_device() -> None:
     sources = [
         SimpleNamespace(
             owner_device_id="master",
@@ -163,7 +182,7 @@ def test_sources_group_by_physical_inverter_not_master_root() -> None:
             root_device_id="separate",
         ),
     ]
-    groups = group_sources_by_inverter(sources)
+    groups = group_sources_by_owner(sources)
     assert set(groups) == {"master", "slave", "separate"}
     assert len(groups["master"]) == 1
     assert len(groups["slave"]) == 1

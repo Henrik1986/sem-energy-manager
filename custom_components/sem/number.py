@@ -6,7 +6,7 @@ from homeassistant.components.number import NumberEntity, NumberMode
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import DOMAIN
-from .systems.huawei_aggregation import value_fits_number_metadata
+from .systems.aggregation import value_fits_number_metadata
 from .systems.proxy import NUMBER_ENTITY_DEFINITIONS, SemEntityProxyMixin
 
 
@@ -42,17 +42,25 @@ class SemSystemNumber(SemEntityProxyMixin, NumberEntity):
     def _update_from_source(self) -> None:
         """Mirror a shared value and the range common to all source entities."""
         states = self.source_states
-        attributes = [
-            state.attributes for state in states if state is not None
-        ]
-        metadata = self._manager.get_number_metadata(
-            self._entity_key,
-            attributes,
-        )
-        self._attr_native_value = self._manager.get_number_value(
-            self._entity_key,
-            states,
-        )
+        if self._manager.has_virtual_number(self._entity_key):
+            metadata = self._manager.get_virtual_number_metadata(
+                self._entity_key
+            )
+            self._attr_native_value = self._manager.get_virtual_number_value(
+                self._entity_key
+            )
+        else:
+            attributes = [
+                state.attributes for state in states if state is not None
+            ]
+            metadata = self._manager.get_number_metadata(
+                self._entity_key,
+                attributes,
+            )
+            self._attr_native_value = self._manager.get_number_value(
+                self._entity_key,
+                states,
+            )
         self._attr_native_min_value = self._number_attribute(
             metadata, "min_value", 0
         )
@@ -82,6 +90,21 @@ class SemSystemNumber(SemEntityProxyMixin, NumberEntity):
 
     async def async_set_native_value(self, value: float) -> None:
         """Validate the requested value against every physical number entity."""
+        if not self._manager.is_entity_writable(self._entity_key):
+            raise HomeAssistantError(
+                f"SEM entity {self._entity_key} does not support writes"
+            )
+
+        if self._manager.has_virtual_number(self._entity_key):
+            handled = await self._manager.async_set_number_value(
+                self._entity_key,
+                value,
+            )
+            if handled:
+                self._update_from_source()
+                self.async_write_ha_state()
+                return
+
         states = self.source_states
         if not states or any(state is None for state in states):
             raise HomeAssistantError(
@@ -130,8 +153,15 @@ class SemSystemNumber(SemEntityProxyMixin, NumberEntity):
         attributes = [
             state.attributes for state in states if state is not None
         ]
+        if self._manager.has_virtual_number(self._entity_key):
+            return (
+                self._manager.is_entity_readable(self._entity_key)
+                and self._manager.is_entity_writable(self._entity_key)
+            )
         return (
             super().available
+            and self._manager.is_entity_readable(self._entity_key)
+            and self._manager.is_entity_writable(self._entity_key)
             and len(attributes) == len(states)
             and bool(self._manager.get_number_metadata(
                 self._entity_key, attributes

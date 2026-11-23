@@ -10,7 +10,6 @@ from homeassistant.components.sensor import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
-from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity import DeviceInfo
 from homeassistant.helpers.event import async_track_state_change_event
@@ -153,9 +152,12 @@ class SemEntityStatusSensor(SensorEntity):
 
     @property
     def native_value(self) -> str:
+        setup_errors = self._manager.get_setup_errors()
         diagnostics = self._manager.get_runtime_diagnostics()
+        runtime_errors = self._manager.get_runtime_errors(diagnostics)
         if (
-            diagnostics.get("setting_mismatches")
+            setup_errors
+            or runtime_errors
             or self._registry.get_status() != "OK"
         ):
             return "ERROR - Check log"
@@ -166,12 +168,14 @@ class SemEntityStatusSensor(SensorEntity):
         attributes = self._registry.as_dict()
         attributes.pop("status", None)
 
-        setup_errors = self._get_setup_errors(attributes)
+        setup_errors = self._manager.get_setup_errors()
         diagnostics = self._manager.get_runtime_diagnostics()
-        runtime_errors = self._get_runtime_errors(diagnostics)
+        runtime_errors = self._manager.get_runtime_errors(diagnostics)
+        runtime_warnings = self._manager.get_runtime_warnings(diagnostics)
         attributes["setup_errors"] = setup_errors
         attributes["runtime_diagnostics"] = diagnostics
         attributes["runtime_errors"] = runtime_errors
+        attributes["runtime_warnings"] = runtime_warnings
 
         if setup_errors:
             attributes["status_message"] = setup_errors[0]["message"]
@@ -179,6 +183,9 @@ class SemEntityStatusSensor(SensorEntity):
         elif runtime_errors:
             attributes["status_message"] = runtime_errors[0]["message"]
             attributes["action_required"] = runtime_errors[0]["action"]
+        elif runtime_warnings:
+            attributes["status_message"] = runtime_warnings[0]["message"]
+            attributes["action_required"] = runtime_warnings[0]["action"]
         elif self._registry.get_status() == "OK":
             attributes["status_message"] = (
                 "Alla obligatoriska entiteter hittades. SEM är redo."
@@ -196,114 +203,6 @@ class SemEntityStatusSensor(SensorEntity):
 
         return attributes
 
-    def _get_setup_errors(self, attributes: dict) -> list[dict]:
-        """Build actionable setup errors for required system entities."""
-        errors = []
-        huawei = attributes.get("systems", {}).get("huawei", {})
-        entities = huawei.get("entities", {})
-        capacity = entities.get("battery_rated_capacity", {})
-        status = capacity.get("status")
-
-        if status not in {"disabled", "missing"}:
-            return errors
-
-        entity_registry = er.async_get(self.hass)
-        device_registry = dr.async_get(self.hass)
-        capacity_sources = capacity.get("sources", [])
-        soc_sources = entities.get("battery_state_of_capacity", {}).get(
-            "sources", []
-        )
-
-        def describe_source(
-            source: dict,
-            issue: str,
-            entity_name_override: str | None = None,
-        ) -> dict:
-            entity_id = source.get("entity_id")
-            device_id = source.get("device_id")
-            entity_entry = (
-                entity_registry.async_get(entity_id) if entity_id else None
-            )
-            device_entry = (
-                device_registry.async_get(device_id) if device_id else None
-            )
-            return {
-                "device_name": (
-                    device_entry.name_by_user or device_entry.name
-                    if device_entry else "Okänd batterienhet"
-                ),
-                "device_id": device_id,
-                "entity_id": entity_id,
-                "entity_name": (
-                    entity_name_override
-                    or (
-                        entity_entry.name or entity_entry.original_name
-                        if entity_entry else "Rated Capacity"
-                    )
-                ),
-                "issue": issue,
-            }
-
-        capacity_by_device = {
-            source.get("device_id"): source
-            for source in capacity_sources
-            if source.get("device_id")
-        }
-        affected_devices = []
-        for battery_source in soc_sources:
-            device_id = battery_source.get("device_id")
-            capacity_source = capacity_by_device.get(device_id)
-            if capacity_source is not None:
-                affected_devices.append(
-                    describe_source(capacity_source, "Entiteten är inaktiverad")
-                )
-            else:
-                affected_devices.append(
-                    describe_source(
-                        battery_source,
-                        "Rated Capacity saknas eller har inte skapats",
-                        "Rated Capacity",
-                    )
-                )
-
-        if status == "disabled":
-            message = (
-                "SEM kan inte beräkna batteriernas totala kapacitet eller "
-                "kapacitetsviktade SOC eftersom 'Rated Capacity' är inaktiverad "
-                "eller saknas på en eller flera batterienheter."
-            )
-        else:
-            message = (
-                "SEM hittar inte Huawei-entiteten 'Rated Capacity' för alla "
-                "identifierade batterienheter. Total batterikapacitet och "
-                "kapacitetsviktad SOC kan därför inte beräknas korrekt."
-            )
-
-        action = (
-            "Aktivera 'Rated Capacity' i Huawei Solar för varje batterienhet "
-            "och ladda därefter om SEM-integrationen. Home Assistant behöver "
-            "inte startas om."
-        )
-
-        return [{
-            "code": (
-                "huawei_battery_capacity_disabled"
-                if status == "disabled"
-                else "huawei_battery_capacity_missing"
-            ),
-            "message": message,
-            "action": action,
-            "steps": [
-                "Öppna Inställningar → Enheter och tjänster → Enheter.",
-                "Öppna varje Huawei-batterienhet (Connected Energy Storage).",
-                "Under Entiteter aktiverar du 'Rated Capacity'. Upprepa för "
-                "samtliga batterienheter i anläggningen.",
-                "Öppna SEM-integrationen och välj Ladda om.",
-            ],
-            "affected_devices": affected_devices,
-            "entities": capacity.get("matches", []),
-        }]
-
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         self.async_on_remove(
@@ -313,118 +212,33 @@ class SemEntityStatusSensor(SensorEntity):
         self._refresh_source_listener()
         self._log_runtime_mismatches()
 
-    def _get_runtime_errors(self, diagnostics: dict) -> list[dict]:
-        """Turn runtime mismatches into clear instructions for the user."""
-        setting_labels = {
-            "battery_working_mode": "Batteriets arbetsläge",
-            "grid_charge_maximum_power": "Maximal nätladdning",
-            "maximum_discharging_power": "Maximal urladdningseffekt",
-            "end_of_discharge_soc": "Urladdningsgräns (SOC)",
-            "power_meter_active_power": "Huawei-effektmätarens värden",
-        }
-        entity_registry = er.async_get(self.hass)
-        device_registry = dr.async_get(self.hass)
-        errors = []
-
-        for mismatch in diagnostics.get("setting_mismatches", []):
-            entity_key = mismatch.get("entity", "unknown")
-            label = setting_labels.get(entity_key, entity_key)
-            details = []
-
-            for source in mismatch.get("sources", []):
-                entity_id = source.get("entity_id")
-                value = source.get("value")
-                entity_entry = (
-                    entity_registry.async_get(entity_id) if entity_id else None
-                )
-                device_entry = (
-                    device_registry.async_get(entity_entry.device_id)
-                    if entity_entry and entity_entry.device_id
-                    else None
-                )
-                device_name = (
-                    device_entry.name_by_user or device_entry.name
-                    if device_entry
-                    else entity_id or "Okänd enhet"
-                )
-
-                if isinstance(value, (int, float)):
-                    formatted_value = f"{value:g}"
-                else:
-                    formatted_value = str(value) if value is not None else "okänt"
-
-                state = self.hass.states.get(entity_id) if entity_id else None
-                unit = (
-                    state.attributes.get("unit_of_measurement")
-                    if state is not None
-                    else None
-                )
-                if unit:
-                    formatted_value = f"{formatted_value} {unit}"
-
-                details.append({
-                    "device": device_name,
-                    "entity_id": entity_id,
-                    "value": formatted_value,
-                })
-
-            if entity_key == "power_meter_active_power":
-                message = mismatch.get("message") or (
-                    f"{label} rapporterar värden som inte stämmer överens."
-                )
-                action = (
-                    "Kontrollera Huawei-effektmätarna och deras anslutningar. "
-                    "SEM använder inte ett osäkert mätvärde."
-                )
-            else:
-                values_text = "; ".join(
-                    f"{item['device']}: {item['value']}"
-                    for item in details
-                )
-                message = (
-                    f"{label} har olika värden mellan Huawei-enheterna: "
-                    f"{values_text}."
-                )
-                action = (
-                    f"Ställ in samma värde för {label.lower()} på samtliga "
-                    "Huawei-enheter. Ändra via SEM eller direkt i Huawei Solar. "
-                    "När värdena överensstämmer visas ett gemensamt värde i SEM."
-                )
-
-            errors.append({
-                "code": f"sem_mismatch_{entity_key}",
-                "setting": label,
-                "message": message,
-                "action": action,
-                "sources": details,
-            })
-
-        return errors
-
     @callback
     def _log_runtime_mismatches(self) -> None:
         """Log each new or changed mismatch once, avoiding repeated warnings."""
         diagnostics = self._manager.get_runtime_diagnostics()
-        errors = self._get_runtime_errors(diagnostics)
-        if not errors:
+        errors = self._manager.get_runtime_errors(diagnostics)
+        warnings = self._manager.get_runtime_warnings(diagnostics)
+        messages = errors + warnings
+        if not messages:
             self._last_logged_mismatch_signature = None
             return
 
         signature = tuple(
             (
-                error["code"],
+                error.get("code"),
+                error.get("message"),
                 tuple(
-                    (source["entity_id"], source["value"])
-                    for source in error["sources"]
+                    (source.get("entity_id"), source.get("value"))
+                    for source in error.get("sources", [])
                 ),
             )
-            for error in errors
+            for error in messages
         )
         if signature == self._last_logged_mismatch_signature:
             return
 
         self._last_logged_mismatch_signature = signature
-        for error in errors:
+        for error in messages:
             _LOGGER.warning(
                 "SEM: %s Åtgärd: %s",
                 error["message"],
@@ -442,6 +256,15 @@ class SemEntityStatusSensor(SensorEntity):
                     for source in entity.get("sources", [])
                     if source.get("entity_id")
                 )
+
+        for entity_key in (
+            self._manager.capabilities.entities
+            if self._manager.capabilities is not None
+            else ()
+        ):
+            source_ids.extend(
+                self._manager.get_related_entity_ids(entity_key)
+            )
 
         source_ids = sorted(set(source_ids))
         if source_ids == self._source_entity_ids:
@@ -486,6 +309,22 @@ class SemSystemSensor(SemEntityProxyMixin, SensorEntity):
             entity_key=entity_key,
             name=name,
             icon=icon,
+        )
+
+    @property
+    def available(self) -> bool:
+        """Require the adapter to declare this sensor as readable."""
+        if self._entity_key == "battery_rated_capacity":
+            return (
+                self._manager.is_entity_readable(self._entity_key)
+                and self._manager.get_sensor_value(
+                    self._entity_key,
+                    self.source_states,
+                ) is not None
+            )
+        return (
+            self._manager.is_entity_readable(self._entity_key)
+            and super().available
         )
 
     @property

@@ -12,14 +12,17 @@ from typing import Any, Final
 from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 
 from .adapter import SemSystemAdapter
+from .capabilities import EntityCapability, SystemCapabilities
 from .entity_resolver import EntityRegistryMatch, find_registry_entities
-from .huawei_aggregation import (
+from .aggregation import (
     capacity_weighted_soc,
     common_sem_options,
     common_number_metadata,
-    group_sources_by_inverter,
+    group_sources_by_owner,
     plant_meter_value,
     parse_numeric,
     sum_numeric_values,
@@ -111,6 +114,30 @@ BATTERY_SETTING_KEYS: Final[frozenset[str]] = frozenset({
 })
 
 
+# Preserve the complete set of entities required by the current Huawei YAML
+# contract. Other adapters may mark non-core entities as optional.
+HUAWEI_CAPABILITIES: Final[SystemCapabilities] = SystemCapabilities(
+    entities={
+        key: EntityCapability(
+            required=True,
+            readable=True,
+            writable=key in (
+                "battery_working_mode",
+                "grid_charge_maximum_power",
+                "maximum_discharging_power",
+                "end_of_discharge_soc",
+            ),
+        )
+        for key in HUAWEI_ENTITY_MAP
+    },
+    commands=frozenset({
+        "set_battery_time_of_use_periods",
+        "set_grid_export_power_limit",
+        "reset_grid_export_power_limit",
+    }),
+)
+
+
 def _to_entity_sources(
     entity_key: str,
     matches: list[EntityRegistryMatch],
@@ -188,7 +215,7 @@ def get_huawei_inverter_groups(
             HUAWEI_SYSTEM_ID,
             entity_key,
         )
-        for inverter_device_id, grouped_sources in group_sources_by_inverter(
+        for inverter_device_id, grouped_sources in group_sources_by_owner(
             sources
         ).items():
             for source in grouped_sources:
@@ -328,7 +355,7 @@ def register_huawei_entities(
     sem_registry.register_system(
         HUAWEI_SYSTEM_ID,
         configured=True,
-        required_entities=list(HUAWEI_ENTITY_MAP),
+        capabilities=HUAWEI_CAPABILITIES,
     )
     resolved = resolve_huawei_entities(hass)
 
@@ -584,7 +611,7 @@ def mark_huawei_entities_missing(
     sem_registry.register_system(
         HUAWEI_SYSTEM_ID,
         configured=True,
-        required_entities=list(HUAWEI_ENTITY_MAP),
+        capabilities=HUAWEI_CAPABILITIES,
     )
     for function in HUAWEI_ENTITY_MAP:
         sem_registry.set_entity_result(
@@ -606,7 +633,6 @@ async def async_wait_for_huawei(
         ConfigEntryState.MIGRATION_ERROR,
         ConfigEntryState.FAILED_UNLOAD,
     }
-    required_entities = list(HUAWEI_ENTITY_MAP)
 
     for _ in range(120):
         if hass.is_stopping:
@@ -620,7 +646,7 @@ async def async_wait_for_huawei(
             sem_registry.register_system(
                 HUAWEI_SYSTEM_ID,
                 configured=False,
-                required_entities=required_entities,
+                capabilities=HUAWEI_CAPABILITIES,
             )
             _LOGGER.warning("Huawei resolver: No enabled Huawei Solar config entry found")
             return
@@ -650,6 +676,11 @@ class HuaweiSolarAdapter(SemSystemAdapter):
 
     system_id = HUAWEI_SYSTEM_ID
     integration_domain = HUAWEI_DOMAIN
+
+    @property
+    def capabilities(self) -> SystemCapabilities:
+        """Return the capabilities supported by Huawei Solar."""
+        return HUAWEI_CAPABILITIES
 
     _WORKING_MODE_MAP: Final[dict[str, str]] = {
         "maximise_self_consumption": "self_consumption",
@@ -845,6 +876,212 @@ class HuaweiSolarAdapter(SemSystemAdapter):
             for option in source_options
         ]
         return super().to_sem_option(entity_key, translated)
+
+    def get_setup_errors(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+    ) -> list[dict]:
+        """Build actionable setup errors for required system entities."""
+        attributes = registry.as_dict()
+        errors = []
+        huawei = attributes.get("systems", {}).get("huawei", {})
+        entities = huawei.get("entities", {})
+        capacity = entities.get("battery_rated_capacity", {})
+        status = capacity.get("status")
+
+        if status not in {"disabled", "missing"}:
+            return errors
+
+        entity_registry = er.async_get(hass)
+        device_registry = dr.async_get(hass)
+        capacity_sources = capacity.get("sources", [])
+        soc_sources = entities.get("battery_state_of_capacity", {}).get(
+            "sources", []
+        )
+
+        def describe_source(
+            source: dict,
+            issue: str,
+            entity_name_override: str | None = None,
+        ) -> dict:
+            entity_id = source.get("entity_id")
+            device_id = source.get("device_id")
+            entity_entry = (
+                entity_registry.async_get(entity_id) if entity_id else None
+            )
+            device_entry = (
+                device_registry.async_get(device_id) if device_id else None
+            )
+            return {
+                "device_name": (
+                    device_entry.name_by_user or device_entry.name
+                    if device_entry else "Okänd batterienhet"
+                ),
+                "device_id": device_id,
+                "entity_id": entity_id,
+                "entity_name": (
+                    entity_name_override
+                    or (
+                        entity_entry.name or entity_entry.original_name
+                        if entity_entry else "Rated Capacity"
+                    )
+                ),
+                "issue": issue,
+            }
+
+        capacity_by_device = {
+            source.get("device_id"): source
+            for source in capacity_sources
+            if source.get("device_id")
+        }
+        affected_devices = []
+        for battery_source in soc_sources:
+            device_id = battery_source.get("device_id")
+            capacity_source = capacity_by_device.get(device_id)
+            if capacity_source is not None:
+                affected_devices.append(
+                    describe_source(capacity_source, "Entiteten är inaktiverad")
+                )
+            else:
+                affected_devices.append(
+                    describe_source(
+                        battery_source,
+                        "Rated Capacity saknas eller har inte skapats",
+                        "Rated Capacity",
+                    )
+                )
+
+        if status == "disabled":
+            message = (
+                "SEM kan inte beräkna batteriernas totala kapacitet eller "
+                "kapacitetsviktade SOC eftersom 'Rated Capacity' är inaktiverad "
+                "eller saknas på en eller flera batterienheter."
+            )
+        else:
+            message = (
+                "SEM hittar inte Huawei-entiteten 'Rated Capacity' för alla "
+                "identifierade batterienheter. Total batterikapacitet och "
+                "kapacitetsviktad SOC kan därför inte beräknas korrekt."
+            )
+
+        action = (
+            "Aktivera 'Rated Capacity' i Huawei Solar för varje batterienhet "
+            "och ladda därefter om SEM-integrationen. Home Assistant behöver "
+            "inte startas om."
+        )
+
+        return [{
+            "code": (
+                "huawei_battery_capacity_disabled"
+                if status == "disabled"
+                else "huawei_battery_capacity_missing"
+            ),
+            "message": message,
+            "action": action,
+            "steps": [
+                "Öppna Inställningar → Enheter och tjänster → Enheter.",
+                "Öppna varje Huawei-batterienhet (Connected Energy Storage).",
+                "Under Entiteter aktiverar du 'Rated Capacity'. Upprepa för "
+                "samtliga batterienheter i anläggningen.",
+                "Öppna SEM-integrationen och välj Ladda om.",
+            ],
+            "affected_devices": affected_devices,
+            "entities": capacity.get("matches", []),
+        }]
+
+    def get_runtime_errors(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        diagnostics: Mapping[str, Any],
+    ) -> list[dict]:
+        """Turn runtime mismatches into clear instructions for the user."""
+        setting_labels = {
+            "battery_working_mode": "Batteriets arbetsläge",
+            "grid_charge_maximum_power": "Maximal nätladdning",
+            "maximum_discharging_power": "Maximal urladdningseffekt",
+            "end_of_discharge_soc": "Urladdningsgräns (SOC)",
+            "power_meter_active_power": "Huawei-effektmätarens värden",
+        }
+        entity_registry = er.async_get(hass)
+        device_registry = dr.async_get(hass)
+        errors = []
+
+        for mismatch in diagnostics.get("setting_mismatches", []):
+            entity_key = mismatch.get("entity", "unknown")
+            label = setting_labels.get(entity_key, entity_key)
+            details = []
+
+            for source in mismatch.get("sources", []):
+                entity_id = source.get("entity_id")
+                value = source.get("value")
+                entity_entry = (
+                    entity_registry.async_get(entity_id) if entity_id else None
+                )
+                device_entry = (
+                    device_registry.async_get(entity_entry.device_id)
+                    if entity_entry and entity_entry.device_id
+                    else None
+                )
+                device_name = (
+                    device_entry.name_by_user or device_entry.name
+                    if device_entry
+                    else entity_id or "Okänd enhet"
+                )
+
+                if isinstance(value, (int, float)):
+                    formatted_value = f"{value:g}"
+                else:
+                    formatted_value = str(value) if value is not None else "okänt"
+
+                state = hass.states.get(entity_id) if entity_id else None
+                unit = (
+                    state.attributes.get("unit_of_measurement")
+                    if state is not None
+                    else None
+                )
+                if unit:
+                    formatted_value = f"{formatted_value} {unit}"
+
+                details.append({
+                    "device": device_name,
+                    "entity_id": entity_id,
+                    "value": formatted_value,
+                })
+
+            if entity_key == "power_meter_active_power":
+                message = mismatch.get("message") or (
+                    f"{label} rapporterar värden som inte stämmer överens."
+                )
+                action = (
+                    "Kontrollera Huawei-effektmätarna och deras anslutningar. "
+                    "SEM använder inte ett osäkert mätvärde."
+                )
+            else:
+                values_text = "; ".join(
+                    f"{item['device']}: {item['value']}"
+                    for item in details
+                )
+                message = (
+                    f"{label} har olika värden mellan Huawei-enheterna: "
+                    f"{values_text}."
+                )
+                action = (
+                    f"Ställ in samma värde för {label.lower()} på samtliga "
+                    "Huawei-enheter. Ändra via SEM eller direkt i Huawei Solar. "
+                    "När värdena överensstämmer visas ett gemensamt värde i SEM."
+                )
+
+            errors.append({
+                "code": f"sem_mismatch_{entity_key}",
+                "setting": label,
+                "message": message,
+                "action": action,
+                "sources": details,
+            })
+
+        return errors
 
     def get_runtime_diagnostics(
         self,
