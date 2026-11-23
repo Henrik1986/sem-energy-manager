@@ -23,6 +23,13 @@ SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY = (
 SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY = (
     solis_helpers.SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY
 )
+SOLIS_GRID_CHARGE_MAXIMUM_POWER_ENTITY_KEY = (
+    solis_helpers.SOLIS_GRID_CHARGE_MAXIMUM_POWER_ENTITY_KEY
+)
+SOLIS_GRID_CHARGE_NO_GRID_SOURCE_OPTION = (
+    solis_helpers.SOLIS_GRID_CHARGE_NO_GRID_SOURCE_OPTION
+)
+solis_grid_charge_blocked_option = solis_helpers.solis_grid_charge_blocked_option
 SOLIS_MODE_TO_SOURCE_OPTION = solis_helpers.SOLIS_MODE_TO_SOURCE_OPTION
 SOLIS_TOU_NUMBER_ENTITY_KEYS = solis_helpers.SOLIS_TOU_NUMBER_ENTITY_KEYS
 build_solis_time_values = solis_helpers.build_solis_time_values
@@ -32,6 +39,23 @@ parse_solis_tou_periods = solis_helpers.parse_solis_tou_periods
 def test_end_of_discharge_soc_maps_to_battery_minimum_soc() -> None:
     assert SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY == "end_of_discharge_soc"
     assert SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY == "battery_minimum_soc"
+
+
+def test_grid_charge_limit_maps_to_existing_sem_number() -> None:
+    assert SOLIS_GRID_CHARGE_MAXIMUM_POWER_ENTITY_KEY == "grid_charge_maximum_power"
+
+
+def test_grid_charge_block_uses_timed_no_grid_mode_only_for_tou() -> None:
+    assert solis_grid_charge_blocked_option("time_of_use") == (
+        SOLIS_GRID_CHARGE_NO_GRID_SOURCE_OPTION
+    )
+    assert solis_grid_charge_blocked_option("self_consumption") == (
+        "Self-Use - No Grid Charging"
+    )
+    assert solis_grid_charge_blocked_option("feed_in_priority") == (
+        "Feed-in priority - No Grid Charging"
+    )
+    assert solis_grid_charge_blocked_option("unsupported") is None
 
 
 def test_sem_modes_map_to_solis_options() -> None:

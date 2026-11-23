@@ -17,6 +17,15 @@ SOLIS_SOURCE_OPTION_TO_MODE = {
 SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY = "end_of_discharge_soc"
 SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY = "battery_minimum_soc"
 
+SOLIS_GRID_CHARGE_MAXIMUM_POWER_ENTITY_KEY = "grid_charge_maximum_power"
+SOLIS_GRID_CHARGE_NO_GRID_SOURCE_OPTION = "Timed Charge/Discharge - No Grid Charging"
+
+def solis_grid_charge_blocked_option(sem_option: str) -> str | None:
+    """Return the Solis working-mode option that prevents grid charging."""
+    if sem_option == "time_of_use":
+        return SOLIS_GRID_CHARGE_NO_GRID_SOURCE_OPTION
+    return SOLIS_MODE_TO_SOURCE_OPTION.get(sem_option)
+
 SOLIS_TOU_NUMBER_FIELDS = (
     "timed_charge_start_hours",
     "timed_charge_start_minutes",

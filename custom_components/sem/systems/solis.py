@@ -4,20 +4,24 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.storage import Store
 
 from .adapter import SemSystemAdapter
 from .capabilities import EntityCapability, SystemCapabilities
 from .registry import EntitySource, SemEntityRegistry
 from .solis_helpers import (
     SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY,
+    SOLIS_GRID_CHARGE_MAXIMUM_POWER_ENTITY_KEY,
+    SOLIS_GRID_CHARGE_NO_GRID_SOURCE_OPTION,
     SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY,
     SOLIS_MODE_TO_SOURCE_OPTION,
     SOLIS_SOURCE_OPTION_TO_MODE,
@@ -25,6 +29,7 @@ from .solis_helpers import (
     SOLIS_TOU_NUMBER_ENTITY_KEYS,
     build_solis_time_values,
     parse_solis_tou_periods,
+    solis_grid_charge_blocked_option,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -33,6 +38,15 @@ SOLIS_DOMAIN = "solax_modbus"
 SOLIS_SYSTEM_ID = "solis"
 SOLIS_MANUFACTURER = "Ginlog Solis"
 SOLIS_SUPPORTED_PLUGINS = frozenset({"solis"})
+SOLIS_GRID_CHARGE_MAXIMUM_POWER_KEY = SOLIS_GRID_CHARGE_MAXIMUM_POWER_ENTITY_KEY
+SOLIS_GRID_CHARGE_STORE_VERSION = 1
+SOLIS_GRID_CHARGE_NUMBER_METADATA = {
+    "min_value": 0,
+    "max_value": 100_000,
+    "step": 1,
+    "unit_of_measurement": "W",
+    "mode": "box",
+}
 
 SOLIS_ENTITY_KEYS = (
     "battery_working_mode",
@@ -49,6 +63,11 @@ SOLIS_CAPABILITIES = SystemCapabilities(
             writable=True,
         ),
         SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY: EntityCapability(
+            required=False,
+            readable=True,
+            writable=True,
+        ),
+        SOLIS_GRID_CHARGE_MAXIMUM_POWER_KEY: EntityCapability(
             required=False,
             readable=True,
             writable=True,
@@ -246,6 +265,10 @@ class SolisAdapter(SemSystemAdapter):
     def __init__(self) -> None:
         self._hass: HomeAssistant | None = None
         self._registry: SemEntityRegistry | None = None
+        self._grid_charge_store: Store | None = None
+        self._grid_charge_value: float | None = None
+        self._grid_charge_override: dict[str, Any] | None = None
+        self._grid_charge_lock = asyncio.Lock()
 
     async def async_setup(
         self,
@@ -255,6 +278,26 @@ class SolisAdapter(SemSystemAdapter):
         """Wait for the standard Solis plugin and resolve its entities."""
         self._hass = hass
         self._registry = registry
+        self._grid_charge_store = Store(
+            hass,
+            SOLIS_GRID_CHARGE_STORE_VERSION,
+            f"{SOLIS_SYSTEM_ID}_grid_charge_override",
+        )
+        stored_grid_charge = await self._grid_charge_store.async_load()
+        if isinstance(stored_grid_charge, Mapping):
+            try:
+                stored_value = float(stored_grid_charge.get("value"))
+            except (TypeError, ValueError):
+                stored_value = None
+            if (
+                stored_value is not None
+                and math.isfinite(stored_value)
+                and stored_value >= 0
+            ):
+                self._grid_charge_value = stored_value
+            stored_override = stored_grid_charge.get("override")
+            if isinstance(stored_override, dict):
+                self._grid_charge_override = stored_override
 
         entries = [
             entry
@@ -298,6 +341,17 @@ class SolisAdapter(SemSystemAdapter):
         # Let entity-registry entries appear after the integration has loaded.
         await asyncio.sleep(2)
         self._resolve_entities(hass, registry, loaded_entries)
+        if self._grid_charge_value == 0 and self._grid_charge_override:
+            try:
+                await self._apply_grid_charge_override(
+                    hass,
+                    registry,
+                    self._grid_charge_override,
+                )
+            except HomeAssistantError:
+                _LOGGER.exception(
+                    "Could not reapply the saved Solis grid-charge block"
+                )
 
     def _mark_all_entities_missing(
         self,
@@ -433,6 +487,345 @@ class SolisAdapter(SemSystemAdapter):
 
         return True
 
+
+    def has_virtual_number(self, entity_key: str) -> bool:
+        """Expose the grid-charge permission as an adapter-managed number."""
+        return (
+            entity_key == SOLIS_GRID_CHARGE_MAXIMUM_POWER_KEY
+            and self._grid_charge_override_supported()
+        )
+
+    def get_virtual_number_value(self, entity_key: str) -> float | None:
+        """Return the configured Solis grid-charge permission value."""
+        if entity_key == SOLIS_GRID_CHARGE_MAXIMUM_POWER_KEY:
+            return self._grid_charge_value
+        return None
+
+    def get_virtual_number_metadata(self, entity_key: str) -> dict[str, Any]:
+        """Expose the watt-based SEM number range."""
+        if entity_key == SOLIS_GRID_CHARGE_MAXIMUM_POWER_KEY:
+            return dict(SOLIS_GRID_CHARGE_NUMBER_METADATA)
+        return {}
+
+    def _grid_charge_mode_entities(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+    ) -> dict[str, str]:
+        """Resolve exactly one working-mode select for every battery inverter."""
+        if registry.get_entity_status(
+            self.system_id,
+            "battery_working_mode",
+        ) != "found":
+            raise HomeAssistantError(
+                "Solis battery working-mode entities are not fully resolved"
+            )
+
+        sources = registry.get_entity_sources(
+            self.system_id,
+            "battery_working_mode",
+        )
+        entities: dict[str, str] = {}
+        for source in sources:
+            if source.device_id is None or source.device_id in entities:
+                raise HomeAssistantError(
+                    "Solis working-mode sources do not map one-to-one "
+                    "to battery inverters"
+                )
+            state = hass.states.get(source.entity_id)
+            if (
+                state is None
+                or state.state in ("unknown", "unavailable")
+                or SOLIS_GRID_CHARGE_NO_GRID_SOURCE_OPTION
+                not in state.attributes.get("options", [])
+            ):
+                raise HomeAssistantError(
+                    f"Solis working-mode entity {source.entity_id} is "
+                    "unavailable or lacks the no-grid-charging option"
+                )
+            entities[source.device_id] = source.entity_id
+
+        if not entities:
+            raise HomeAssistantError(
+                "No Solis battery working-mode entities were found"
+            )
+        return entities
+
+    def _build_grid_charge_override(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+    ) -> dict[str, Any]:
+        """Capture the current SEM mode for restoration after blocking grid charge."""
+        entities = self._grid_charge_mode_entities(hass, registry)
+        devices = []
+        for device_id, entity_id in sorted(entities.items()):
+            state = hass.states.get(entity_id)
+            assert state is not None
+            current_option = state.state
+            if current_option not in SOLIS_SOURCE_OPTION_TO_MODE:
+                raise HomeAssistantError(
+                    f"Cannot safely block Solis grid charging while "
+                    f"{entity_id} is in unsupported mode {current_option!r}"
+                )
+            blocked_option = solis_grid_charge_blocked_option(
+                SOLIS_SOURCE_OPTION_TO_MODE[current_option]
+            )
+            if blocked_option is None or blocked_option not in state.attributes.get(
+                "options", []
+            ):
+                raise HomeAssistantError(
+                    f"Solis inverter {entity_id} does not support a safe "
+                    "no-grid-charging working mode"
+                )
+            devices.append(
+                {
+                    "device_id": device_id,
+                    "previous_option": current_option,
+                    "blocked_option": blocked_option,
+                }
+            )
+
+        return {"active": True, "devices": devices}
+
+    def _grid_charge_override_supported(self) -> bool:
+        """Require every battery inverter to support safe mode switching."""
+        if self._hass is None or self._registry is None:
+            return False
+        try:
+            entities = self._grid_charge_mode_entities(
+                self._hass,
+                self._registry,
+            )
+            if self._grid_charge_override is None:
+                self._build_grid_charge_override(
+                    self._hass,
+                    self._registry,
+                )
+                return True
+
+            saved_devices = self._grid_charge_override.get("devices")
+            if not isinstance(saved_devices, list):
+                return False
+            saved_by_device = {
+                item.get("device_id"): item
+                for item in saved_devices
+                if isinstance(item, dict)
+            }
+            if set(saved_by_device) != set(entities):
+                return False
+            for device_id, entity_id in entities.items():
+                item = saved_by_device[device_id]
+                state = self._hass.states.get(entity_id)
+                if state is None:
+                    return False
+                options = state.attributes.get("options", [])
+                if item.get("previous_option") not in options:
+                    return False
+                if item.get("blocked_option") not in options:
+                    return False
+            return True
+        except (HomeAssistantError, TypeError):
+            return False
+
+    async def _save_grid_charge_state(self) -> None:
+        """Persist the requested number and working-mode restoration snapshot."""
+        if self._grid_charge_store is None:
+            return
+        await self._grid_charge_store.async_save(
+            {
+                "value": self._grid_charge_value,
+                "override": self._grid_charge_override,
+            }
+        )
+
+    @staticmethod
+    async def _set_working_mode_options(
+        hass: HomeAssistant,
+        options_by_entity: Mapping[str, str],
+    ) -> None:
+        """Apply select options by group, avoiding unnecessary Modbus writes."""
+        by_option: dict[str, list[str]] = defaultdict(list)
+        for entity_id, option in options_by_entity.items():
+            state = hass.states.get(entity_id)
+            if (
+                state is None
+                or state.state in ("unknown", "unavailable")
+                or option not in state.attributes.get("options", [])
+            ):
+                raise HomeAssistantError(
+                    f"Solis working-mode entity {entity_id} cannot select "
+                    f"{option!r}"
+                )
+            if state.state != option:
+                by_option[option].append(entity_id)
+
+        for option, entity_ids in by_option.items():
+            await hass.services.async_call(
+                "select",
+                "select_option",
+                {
+                    "entity_id": sorted(entity_ids),
+                    "option": option,
+                },
+                blocking=True,
+            )
+
+    async def _apply_grid_charge_override(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        override: Mapping[str, Any],
+    ) -> None:
+        """Apply saved no-grid-charging modes to every battery inverter."""
+        entities = self._grid_charge_mode_entities(hass, registry)
+        saved_devices = override.get("devices")
+        if not isinstance(saved_devices, list):
+            raise HomeAssistantError("Solis grid-charge override is invalid")
+        saved_by_device = {
+            item.get("device_id"): item
+            for item in saved_devices
+            if isinstance(item, dict)
+        }
+        if set(saved_by_device) != set(entities):
+            raise HomeAssistantError(
+                "Solis grid-charge override does not match the detected batteries"
+            )
+        options_by_entity = {
+            entity_id: saved_by_device[device_id]["blocked_option"]
+            for device_id, entity_id in entities.items()
+        }
+        await self._set_working_mode_options(hass, options_by_entity)
+
+    async def _restore_grid_charge_override(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        override: Mapping[str, Any],
+    ) -> None:
+        """Restore the exact working mode that was active before the block."""
+        entities = self._grid_charge_mode_entities(hass, registry)
+        saved_devices = override.get("devices")
+        if not isinstance(saved_devices, list):
+            raise HomeAssistantError("Solis grid-charge override is invalid")
+        saved_by_device = {
+            item.get("device_id"): item
+            for item in saved_devices
+            if isinstance(item, dict)
+        }
+        if set(saved_by_device) != set(entities):
+            raise HomeAssistantError(
+                "Solis grid-charge override does not match the detected batteries"
+            )
+        options_by_entity = {
+            entity_id: saved_by_device[device_id]["previous_option"]
+            for device_id, entity_id in entities.items()
+        }
+        await self._set_working_mode_options(hass, options_by_entity)
+
+    async def async_set_number_value(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        entity_key: str,
+        value: float,
+    ) -> bool:
+        """Block grid charging at zero and restore the previous mode above zero."""
+        if entity_key != SOLIS_GRID_CHARGE_MAXIMUM_POWER_KEY:
+            return False
+        if (
+            not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise HomeAssistantError(
+                "Solis grid-charge maximum power must be a finite number "
+                "greater than or equal to zero"
+            )
+
+        async with self._grid_charge_lock:
+            if value == 0:
+                if not self._grid_charge_override_supported():
+                    raise HomeAssistantError(
+                        "Solis grid-charge blocking is not supported by every "
+                        "detected battery inverter"
+                    )
+                if self._grid_charge_override is None:
+                    self._grid_charge_override = self._build_grid_charge_override(
+                        hass,
+                        registry,
+                    )
+                self._grid_charge_value = 0
+                await self._save_grid_charge_state()
+                await self._apply_grid_charge_override(
+                    hass,
+                    registry,
+                    self._grid_charge_override,
+                )
+            else:
+                if self._grid_charge_override is not None:
+                    await self._restore_grid_charge_override(
+                        hass,
+                        registry,
+                        self._grid_charge_override,
+                    )
+                    self._grid_charge_override = None
+                self._grid_charge_value = float(value)
+                await self._save_grid_charge_state()
+
+        return True
+
+    async def async_after_select_option(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        entity_key: str,
+        sem_option: str,
+    ) -> None:
+        """Keep grid charging blocked when SEM changes the working mode."""
+        if (
+            entity_key != "battery_working_mode"
+            or self._grid_charge_value != 0
+            or self._grid_charge_override is None
+        ):
+            return
+
+        previous_option = SOLIS_MODE_TO_SOURCE_OPTION.get(sem_option)
+        blocked_option = solis_grid_charge_blocked_option(sem_option)
+        if previous_option is None or blocked_option is None:
+            raise HomeAssistantError(
+                f"Unsupported SEM Solis working mode while grid charging is "
+                f"blocked: {sem_option}"
+            )
+
+        entities = self._grid_charge_mode_entities(hass, registry)
+        saved_devices = self._grid_charge_override.get("devices")
+        if not isinstance(saved_devices, list):
+            raise HomeAssistantError("Solis grid-charge override is invalid")
+        saved_by_device = {
+            item.get("device_id"): item
+            for item in saved_devices
+            if isinstance(item, dict)
+        }
+        if set(saved_by_device) != set(entities):
+            raise HomeAssistantError(
+                "Solis grid-charge override does not match the detected batteries"
+            )
+
+        for device_id, entity_id in entities.items():
+            state = hass.states.get(entity_id)
+            if state is None or blocked_option not in state.attributes.get(
+                "options", []
+            ):
+                raise HomeAssistantError(
+                    f"Solis inverter {entity_id} cannot use {blocked_option!r}"
+                )
+            saved_by_device[device_id]["previous_option"] = previous_option
+            saved_by_device[device_id]["blocked_option"] = blocked_option
+
+        self._grid_charge_override["devices"] = list(saved_by_device.values())
+        await self._save_grid_charge_state()
+
     def get_sem_options(
         self,
         entity_key: str,
@@ -502,6 +895,8 @@ class SolisAdapter(SemSystemAdapter):
             raise ValueError("No complete set of Solis working-mode sources found")
 
         source_option = SOLIS_MODE_TO_SOURCE_OPTION.get(sem_option)
+        if self._grid_charge_value == 0 and self._grid_charge_override is not None:
+            source_option = solis_grid_charge_blocked_option(sem_option)
         if source_option is None:
             raise ValueError(f"Unsupported SEM Solis working mode: {sem_option}")
 
@@ -531,7 +926,14 @@ class SolisAdapter(SemSystemAdapter):
 
         translated = []
         for source_option in source_options:
-            sem_option = SOLIS_SOURCE_OPTION_TO_MODE.get(source_option)
+            if (
+                self._grid_charge_value == 0
+                and self._grid_charge_override is not None
+                and source_option == SOLIS_GRID_CHARGE_NO_GRID_SOURCE_OPTION
+            ):
+                sem_option = "time_of_use"
+            else:
+                sem_option = SOLIS_SOURCE_OPTION_TO_MODE.get(source_option)
             if sem_option == "time_of_use" and not self._time_control_available():
                 sem_option = None
             translated.append(sem_option)
