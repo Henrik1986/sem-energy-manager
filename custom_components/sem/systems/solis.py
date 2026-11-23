@@ -9,7 +9,7 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, State
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
@@ -19,6 +19,8 @@ from .adapter import SemSystemAdapter
 from .capabilities import EntityCapability, SystemCapabilities
 from .registry import EntitySource, SemEntityRegistry
 from .solis_helpers import (
+    SOLIS_BATTERY_SOC_ENTITY_KEY,
+    SOLIS_BATTERY_SOC_SOURCE_KEY,
     SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY,
     SOLIS_GRID_CHARGE_MAXIMUM_POWER_ENTITY_KEY,
     SOLIS_GRID_CHARGE_NO_GRID_SOURCE_OPTION,
@@ -31,6 +33,7 @@ from .solis_helpers import (
     build_solis_discharge_current_values,
     parse_solis_tou_periods,
     solis_grid_charge_blocked_option,
+    solis_battery_soc_value,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -62,6 +65,7 @@ SOLIS_BATTERY_VOLTAGE_ENTITY_KEY = "battery_voltage"
 
 SOLIS_ENTITY_KEYS = (
     "battery_working_mode",
+    SOLIS_BATTERY_SOC_ENTITY_KEY,
     SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY,
     SOLIS_MAXIMUM_DISCHARGING_CURRENT_ENTITY_KEY,
     SOLIS_BATTERY_VOLTAGE_ENTITY_KEY,
@@ -75,6 +79,11 @@ SOLIS_CAPABILITIES = SystemCapabilities(
             required=True,
             readable=True,
             writable=True,
+        ),
+        SOLIS_BATTERY_SOC_ENTITY_KEY: EntityCapability(
+            required=True,
+            readable=True,
+            writable=False,
         ),
         SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY: EntityCapability(
             required=False,
@@ -487,6 +496,10 @@ class SolisAdapter(SemSystemAdapter):
                 "select",
                 "energy_storage_control_switch",
             ),
+            SOLIS_BATTERY_SOC_ENTITY_KEY: (
+                "sensor",
+                SOLIS_BATTERY_SOC_SOURCE_KEY,
+            ),
             SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY: (
                 "number",
                 SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY,
@@ -523,6 +536,51 @@ class SolisAdapter(SemSystemAdapter):
                 matches=matches,
                 expected_device_ids=battery_device_ids,
             )
+
+    def get_sensor_value(
+        self,
+        entity_key: str,
+        source_states: Sequence[State | None],
+    ) -> float | str | None:
+        """Return the battery-bank SOC using safe Solis source data."""
+        if entity_key != SOLIS_BATTERY_SOC_ENTITY_KEY:
+            return super().get_sensor_value(entity_key, source_states)
+
+        if not source_states or any(
+            state is None or state.state in ("unknown", "unavailable")
+            for state in source_states
+        ):
+            return None
+
+        if (
+            self._registry is None
+            or self._registry.get_entity_status(
+                self.system_id,
+                SOLIS_BATTERY_SOC_ENTITY_KEY,
+            ) != "found"
+        ):
+            return None
+
+        sources = self._registry.get_entity_sources(
+            self.system_id,
+            SOLIS_BATTERY_SOC_ENTITY_KEY,
+        )
+        if len(sources) != len(source_states):
+            return None
+
+        device_ids = [source.device_id for source in sources]
+        if (
+            any(device_id is None for device_id in device_ids)
+            or len(set(device_ids)) != len(device_ids)
+        ):
+            return None
+
+        # The standard plugin does not expose per-battery rated capacity.
+        # Multiple readings are safe only when they agree; never publish an
+        # unweighted average for batteries with different SOC values.
+        return solis_battery_soc_value(
+            [state.state for state in source_states if state is not None]
+        )
 
     def _time_control_available(self) -> bool:
         """Require all local time values and all three update buttons."""

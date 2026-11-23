@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 
 
 SOLIS_MODE_TO_SOURCE_OPTION = {
@@ -19,8 +19,36 @@ SOLIS_SOURCE_OPTION_TO_MODE = {
 SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY = "end_of_discharge_soc"
 SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY = "battery_minimum_soc"
 
+SOLIS_BATTERY_SOC_ENTITY_KEY = "battery_state_of_capacity"
+SOLIS_BATTERY_SOC_SOURCE_KEY = "battery_soc"
+
 SOLIS_GRID_CHARGE_MAXIMUM_POWER_ENTITY_KEY = "grid_charge_maximum_power"
 SOLIS_GRID_CHARGE_NO_GRID_SOURCE_OPTION = "Timed Charge/Discharge - No Grid Charging"
+
+def solis_battery_soc_value(values: Sequence[object]) -> float | None:
+    """Return SOC only when all available Solis inverter readings agree."""
+    if not values:
+        return None
+
+    parsed: list[float] = []
+    for value in values:
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(numeric) or not 0 <= numeric <= 100:
+            return None
+        parsed.append(numeric)
+
+    reference = parsed[0]
+    if any(
+        not math.isclose(value, reference, rel_tol=0.0, abs_tol=1e-6)
+        for value in parsed[1:]
+    ):
+        return None
+
+    return reference
+
 
 def solis_grid_charge_blocked_option(sem_option: str) -> str | None:
     """Return the Solis working-mode option that prevents grid charging."""

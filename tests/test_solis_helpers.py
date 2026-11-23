@@ -17,6 +17,9 @@ assert SPEC is not None and SPEC.loader is not None
 solis_helpers = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(solis_helpers)
 
+SOLIS_BATTERY_SOC_ENTITY_KEY = solis_helpers.SOLIS_BATTERY_SOC_ENTITY_KEY
+SOLIS_BATTERY_SOC_SOURCE_KEY = solis_helpers.SOLIS_BATTERY_SOC_SOURCE_KEY
+solis_battery_soc_value = solis_helpers.solis_battery_soc_value
 SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY = (
     solis_helpers.SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY
 )
@@ -37,6 +40,25 @@ build_solis_discharge_current_values = (
     solis_helpers.build_solis_discharge_current_values
 )
 parse_solis_tou_periods = solis_helpers.parse_solis_tou_periods
+
+
+def test_battery_soc_maps_to_standard_solis_sensor() -> None:
+    assert SOLIS_BATTERY_SOC_ENTITY_KEY == "battery_state_of_capacity"
+    assert SOLIS_BATTERY_SOC_SOURCE_KEY == "battery_soc"
+
+
+def test_single_and_matching_solis_soc_readings_are_preserved() -> None:
+    assert solis_battery_soc_value(["72"]) == 72
+    assert solis_battery_soc_value(["72", 72.0]) == 72
+
+
+def test_different_solis_soc_readings_are_not_averaged() -> None:
+    assert solis_battery_soc_value(["70", "60"]) is None
+
+
+def test_invalid_solis_soc_readings_are_rejected() -> None:
+    for values in ([], ["unknown"], ["101"], ["-1"], ["nan"], ["50", "unavailable"]):
+        assert solis_battery_soc_value(values) is None
 
 
 def test_end_of_discharge_soc_maps_to_battery_minimum_soc() -> None:
