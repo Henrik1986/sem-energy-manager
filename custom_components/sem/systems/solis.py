@@ -22,6 +22,12 @@ from .registry import EntitySource, SemEntityRegistry
 from .solis_helpers import (
     SOLIS_BATTERY_SOC_ENTITY_KEY,
     SOLIS_BATTERY_SOC_SOURCE_KEY,
+    SOLIS_BATTERY_POWER_ENTITY_KEY,
+    SOLIS_BATTERY_POWER_SOURCE_KEYS,
+    SOLIS_BATTERY_CHARGE_POWER_SOURCE_KEY,
+    SOLIS_BATTERY_DISCHARGE_POWER_SOURCE_KEY,
+    SOLIS_POWER_METER_ENTITY_KEY,
+    SOLIS_POWER_METER_SOURCE_KEY,
     SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY,
     SOLIS_INVERTER_INPUT_POWER_SOURCE_KEY,
     SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY,
@@ -39,6 +45,7 @@ from .solis_helpers import (
     parse_solis_tou_periods,
     solis_grid_charge_blocked_option,
     solis_battery_soc_value,
+    solis_battery_power_value,
     solis_total_capacity_kwh,
     sum_solis_pv_power,
 )
@@ -73,6 +80,7 @@ SOLIS_BATTERY_VOLTAGE_ENTITY_KEY = "battery_voltage"
 SOLIS_ENTITY_KEYS = (
     "battery_working_mode",
     SOLIS_BATTERY_SOC_ENTITY_KEY,
+    SOLIS_BATTERY_POWER_ENTITY_KEY,
     SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY,
     SOLIS_POWER_METER_ENTITY_KEY,
     SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY,
@@ -90,6 +98,11 @@ SOLIS_CAPABILITIES = SystemCapabilities(
             writable=True,
         ),
         SOLIS_BATTERY_SOC_ENTITY_KEY: EntityCapability(
+            required=True,
+            readable=True,
+            writable=False,
+        ),
+        SOLIS_BATTERY_POWER_ENTITY_KEY: EntityCapability(
             required=True,
             readable=True,
             writable=False,
@@ -309,6 +322,107 @@ def _resolve_expected_sources(
         device_id=sources[0].device_id if sources else None,
         config_entry_id=sources[0].config_entry_id if sources else None,
         matches=[entry.entity_id for entry in all_matches],
+        sources=sources,
+    )
+
+
+def _resolve_paired_sensor_sources(
+    registry: SemEntityRegistry,
+    device_registry: dr.DeviceRegistry,
+    *,
+    entity_key: str,
+    matches: Sequence[Any],
+    expected_device_ids: Sequence[str],
+    source_keys: Sequence[str],
+) -> None:
+    """Resolve every sensor source key once per expected battery inverter."""
+    active_by_source: dict[tuple[str, str], list[Any]] = defaultdict(list)
+    disabled_by_source: dict[tuple[str, str], list[Any]] = defaultdict(list)
+    expected_pairs = [
+        (device_id, source_key)
+        for device_id in expected_device_ids
+        for source_key in source_keys
+    ]
+
+    for entity_entry in matches:
+        device_id = entity_entry.device_id
+        if device_id is None or device_id not in expected_device_ids:
+            continue
+        source_key = next(
+            (
+                key
+                for key in source_keys
+                if _entity_key_matches(entity_entry.unique_id, key)
+            ),
+            None,
+        )
+        if source_key is None:
+            continue
+
+        target = (
+            active_by_source
+            if _disabled_by(entity_entry) is None
+            else disabled_by_source
+        )
+        target[(device_id, source_key)].append(entity_entry)
+
+    duplicates = [
+        pair
+        for pair in expected_pairs
+        if len(active_by_source.get(pair, [])) > 1
+    ]
+    missing = [
+        pair
+        for pair in expected_pairs
+        if not active_by_source.get(pair)
+    ]
+    all_matches = [
+        entity_entry
+        for pair in expected_pairs
+        for entity_entry in (
+            active_by_source.get(pair, [])
+            + disabled_by_source.get(pair, [])
+        )
+    ]
+
+    if not expected_device_ids or not source_keys:
+        status = "missing"
+        selected = []
+    elif duplicates:
+        status = "ambiguous"
+        selected = [
+            entity_entry
+            for pair in expected_pairs
+            for entity_entry in active_by_source.get(pair, [])
+        ]
+    elif missing:
+        status = (
+            "disabled"
+            if any(disabled_by_source.get(pair) for pair in missing)
+            else "missing"
+        )
+        selected = all_matches
+    else:
+        status = "found"
+        selected = [
+            active_by_source[pair][0]
+            for pair in expected_pairs
+        ]
+
+    sources = [
+        _source_from_entry(entity_entry, device_registry)
+        for entity_entry in selected
+    ]
+    registry.set_entity_result(
+        SOLIS_SYSTEM_ID,
+        entity_key,
+        status=status,
+        entity_id=sources[0].entity_id if sources else None,
+        unique_id=sources[0].unique_id if sources else None,
+        platform=SOLIS_DOMAIN if sources else None,
+        device_id=sources[0].device_id if sources else None,
+        config_entry_id=sources[0].config_entry_id if sources else None,
+        matches=[entity_entry.entity_id for entity_entry in all_matches],
         sources=sources,
     )
 
@@ -560,6 +674,14 @@ class SolisAdapter(SemSystemAdapter):
                 and (
                     _entity_key_matches(entry.unique_id, "battery_soc")
                     or _entity_key_matches(entry.unique_id, "battery_power")
+                    or _entity_key_matches(
+                        entry.unique_id,
+                        SOLIS_BATTERY_CHARGE_POWER_SOURCE_KEY,
+                    )
+                    or _entity_key_matches(
+                        entry.unique_id,
+                        SOLIS_BATTERY_DISCHARGE_POWER_SOURCE_KEY,
+                    )
                 )
             }
         )
@@ -613,6 +735,24 @@ class SolisAdapter(SemSystemAdapter):
                 expected_device_ids=battery_device_ids,
             )
 
+        battery_power_matches = [
+            entry
+            for entry in entity_entries
+            if entry.domain == "sensor"
+            and any(
+                _entity_key_matches(entry.unique_id, source_key)
+                for source_key in SOLIS_BATTERY_POWER_SOURCE_KEYS
+            )
+        ]
+        _resolve_paired_sensor_sources(
+            registry,
+            device_registry,
+            entity_key=SOLIS_BATTERY_POWER_ENTITY_KEY,
+            matches=battery_power_matches,
+            expected_device_ids=battery_device_ids,
+            source_keys=SOLIS_BATTERY_POWER_SOURCE_KEYS,
+        )
+
         # PV production is measured once per inverter, including units without
         # a battery. pv_total_power already combines the inverter's PV strings.
         pv_power_matches = [
@@ -661,6 +801,70 @@ class SolisAdapter(SemSystemAdapter):
             if helper_state is None:
                 return None
             return solis_total_capacity_kwh(helper_state.state)
+
+        if entity_key == SOLIS_BATTERY_POWER_ENTITY_KEY:
+            if not source_states or any(
+                state is None or state.state in ("unknown", "unavailable")
+                for state in source_states
+            ):
+                return None
+
+            if (
+                self._registry is None
+                or self._registry.get_entity_status(
+                    self.system_id,
+                    SOLIS_BATTERY_POWER_ENTITY_KEY,
+                ) != "found"
+            ):
+                return None
+
+            sources = self._registry.get_entity_sources(
+                self.system_id,
+                SOLIS_BATTERY_POWER_ENTITY_KEY,
+            )
+            if len(sources) != len(source_states):
+                return None
+
+            charge_values = []
+            discharge_values = []
+            seen_pairs = set()
+            for source, state in zip(sources, source_states):
+                if source.device_id is None:
+                    return None
+                source_key = next(
+                    (
+                        key
+                        for key in SOLIS_BATTERY_POWER_SOURCE_KEYS
+                        if _entity_key_matches(source.unique_id, key)
+                    ),
+                    None,
+                )
+                pair = (source.device_id, source_key)
+                if source_key is None or pair in seen_pairs:
+                    return None
+                seen_pairs.add(pair)
+                if source_key == SOLIS_BATTERY_CHARGE_POWER_SOURCE_KEY:
+                    charge_values.append(state.state)
+                else:
+                    discharge_values.append(state.state)
+
+            expected_device_ids = {
+                source.device_id for source in sources
+            }
+            expected_pairs = {
+                (device_id, source_key)
+                for device_id in expected_device_ids
+                for source_key in SOLIS_BATTERY_POWER_SOURCE_KEYS
+            }
+            if seen_pairs != expected_pairs:
+                return None
+
+            # The plugin exposes positive charge and discharge power separately.
+            # SEM uses positive for charging and negative for discharging.
+            return solis_battery_power_value(
+                charge_values,
+                discharge_values,
+            )
 
         if entity_key == SOLIS_POWER_METER_ENTITY_KEY:
             if not source_states or any(
@@ -778,21 +982,18 @@ class SolisAdapter(SemSystemAdapter):
         entity_key: str,
         source_attributes: Sequence[Mapping[str, Any]],
     ) -> dict[str, Any]:
-        """Expose the Solis battery capacity in the shared SEM kWh unit."""
+        """Expose normalized metadata for Solis battery and power sensors."""
         if entity_key == SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY:
             return {
                 "device_class": "energy",
                 "unit_of_measurement": "kWh",
                 "suggested_display_precision": 2,
             }
-        if entity_key == SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY:
-            return {
-                "device_class": "power",
-                "state_class": "measurement",
-                "unit_of_measurement": "W",
-                "suggested_display_precision": 0,
-            }
-        if entity_key == SOLIS_POWER_METER_ENTITY_KEY:
+        if entity_key in {
+            SOLIS_BATTERY_POWER_ENTITY_KEY,
+            SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY,
+            SOLIS_POWER_METER_ENTITY_KEY,
+        }:
             return {
                 "device_class": "power",
                 "state_class": "measurement",

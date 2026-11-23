@@ -18,6 +18,15 @@ solis_helpers = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(solis_helpers)
 
 SOLIS_BATTERY_SOC_ENTITY_KEY = solis_helpers.SOLIS_BATTERY_SOC_ENTITY_KEY
+SOLIS_BATTERY_POWER_ENTITY_KEY = solis_helpers.SOLIS_BATTERY_POWER_ENTITY_KEY
+SOLIS_BATTERY_POWER_SOURCE_KEYS = solis_helpers.SOLIS_BATTERY_POWER_SOURCE_KEYS
+SOLIS_BATTERY_CHARGE_POWER_SOURCE_KEY = (
+    solis_helpers.SOLIS_BATTERY_CHARGE_POWER_SOURCE_KEY
+)
+SOLIS_BATTERY_DISCHARGE_POWER_SOURCE_KEY = (
+    solis_helpers.SOLIS_BATTERY_DISCHARGE_POWER_SOURCE_KEY
+)
+solis_battery_power_value = solis_helpers.solis_battery_power_value
 SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY = solis_helpers.SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY
 SOLIS_POWER_METER_ENTITY_KEY = solis_helpers.SOLIS_POWER_METER_ENTITY_KEY
 SOLIS_POWER_METER_SOURCE_KEY = solis_helpers.SOLIS_POWER_METER_SOURCE_KEY
@@ -60,6 +69,41 @@ def test_power_meter_maps_to_standard_solis_meter_sensor() -> None:
 def test_inverter_input_power_maps_to_pv_total_power_per_inverter() -> None:
     assert SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY == "inverter_input_power"
     assert SOLIS_INVERTER_INPUT_POWER_SOURCE_KEY == "pv_total_power"
+
+
+def test_battery_power_maps_to_charge_and_discharge_sources() -> None:
+    assert SOLIS_BATTERY_POWER_ENTITY_KEY == "battery_power"
+    assert SOLIS_BATTERY_POWER_SOURCE_KEYS == (
+        SOLIS_BATTERY_CHARGE_POWER_SOURCE_KEY,
+        SOLIS_BATTERY_DISCHARGE_POWER_SOURCE_KEY,
+    )
+    assert SOLIS_BATTERY_CHARGE_POWER_SOURCE_KEY == "battery_input_energy"
+    assert SOLIS_BATTERY_DISCHARGE_POWER_SOURCE_KEY == "battery_output_energy"
+
+
+def test_solis_battery_power_uses_the_expected_sign_convention() -> None:
+    assert solis_battery_power_value([1500], [0]) == 1500
+    assert solis_battery_power_value([0], [850]) == -850
+
+
+def test_solis_battery_power_sums_multiple_battery_inverters() -> None:
+    assert solis_battery_power_value([1000, 500], [100, 200]) == 1200
+
+
+def test_solis_battery_power_rejects_incomplete_or_invalid_readings() -> None:
+    invalid_pairs = (
+        ([], []),
+        ([100], []),
+        ([True], [0]),
+        ([100], [-1]),
+        (["unknown"], [0]),
+        ([float("nan")], [0]),
+    )
+    for charge_values, discharge_values in invalid_pairs:
+        assert solis_battery_power_value(
+            charge_values,
+            discharge_values,
+        ) is None
 
 
 def test_solis_pv_power_sums_all_inverter_readings() -> None:

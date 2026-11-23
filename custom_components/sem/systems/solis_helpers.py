@@ -21,6 +21,13 @@ SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY = "battery_minimum_soc"
 
 SOLIS_BATTERY_SOC_ENTITY_KEY = "battery_state_of_capacity"
 SOLIS_BATTERY_SOC_SOURCE_KEY = "battery_soc"
+SOLIS_BATTERY_POWER_ENTITY_KEY = "battery_power"
+SOLIS_BATTERY_CHARGE_POWER_SOURCE_KEY = "battery_input_energy"
+SOLIS_BATTERY_DISCHARGE_POWER_SOURCE_KEY = "battery_output_energy"
+SOLIS_BATTERY_POWER_SOURCE_KEYS = (
+    SOLIS_BATTERY_CHARGE_POWER_SOURCE_KEY,
+    SOLIS_BATTERY_DISCHARGE_POWER_SOURCE_KEY,
+)
 SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY = "inverter_input_power"
 SOLIS_INVERTER_INPUT_POWER_SOURCE_KEY = "pv_total_power"
 SOLIS_POWER_METER_ENTITY_KEY = "power_meter_active_power"
@@ -49,6 +56,32 @@ def sum_solis_pv_power(values: Sequence[object]) -> float | None:
         parsed.append(numeric)
 
     return sum(parsed)
+
+
+def solis_battery_power_value(
+    charge_values: Sequence[object],
+    discharge_values: Sequence[object],
+) -> float | None:
+    """Return signed battery power from positive Solis charge/discharge readings."""
+    if not charge_values or len(charge_values) != len(discharge_values):
+        return None
+
+    parsed_values: list[list[float]] = []
+    for values in (charge_values, discharge_values):
+        parsed: list[float] = []
+        for value in values:
+            if isinstance(value, bool):
+                return None
+            try:
+                numeric = float(value)
+            except (TypeError, ValueError):
+                return None
+            if not math.isfinite(numeric) or numeric < 0:
+                return None
+            parsed.append(numeric)
+        parsed_values.append(parsed)
+
+    return math.fsum(parsed_values[0]) - math.fsum(parsed_values[1])
 
 
 def solis_total_capacity_kwh(value: object) -> float | None:
