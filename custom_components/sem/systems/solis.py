@@ -15,7 +15,6 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 
-from .aggregation import parse_numeric
 
 from .adapter import SemSystemAdapter
 from .capabilities import EntityCapability, SystemCapabilities

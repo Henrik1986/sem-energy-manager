@@ -18,7 +18,9 @@ solis_helpers = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(solis_helpers)
 
 SOLIS_BATTERY_SOC_ENTITY_KEY = solis_helpers.SOLIS_BATTERY_SOC_ENTITY_KEY
-SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY = solis_helpers.SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY
+SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY = (
+    solis_helpers.SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY
+)
 SOLIS_TOTAL_CAPACITY_HELPER = solis_helpers.SOLIS_TOTAL_CAPACITY_HELPER
 solis_total_capacity_kwh = solis_helpers.solis_total_capacity_kwh
 SOLIS_BATTERY_SOC_SOURCE_KEY = solis_helpers.SOLIS_BATTERY_SOC_SOURCE_KEY
