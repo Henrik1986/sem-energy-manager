@@ -187,7 +187,7 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else (
                 "🔴 Följande frontend-kort saknas i Marketplace:\n\n"
                 + "\n".join(
-                    f"• {name}: {MARKETPLACE_CARDS[name]['url']}"
+                    f"• {name} – [Klicka här för att installera]({MARKETPLACE_CARDS[name]['url']})"
                     for name in missing
                 )
                 + "\n\nÖppna länkarna för att installera korten via Marketplace. "
