@@ -19,6 +19,7 @@ Din anläggning måste vara integrerad med Home Assistant.
 
 Systemet har stöd för
 - Huawei – https://github.com/wlcrs/huawei_solar
+- Solax - https://github.com/wills106/homeassistant-solax-modbus [BETA]
 
 ### Huawei – kontrollera före installation av SEM
 
