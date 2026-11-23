@@ -1,4 +1,3 @@
-
 from homeassistant import config_entries
 import voluptuous as vol
 import os
@@ -9,6 +8,25 @@ import shutil
 DOMAIN = "sem"
 
 ZIP_URL = "https://github.com/Henrik1986/huawei-energy-managment/archive/refs/heads/main.zip"
+
+MARKETPLACE_CARDS = {
+    "ApexCharts Card": {
+        "path": "/config/www/community/apexcharts-card",
+        "url": "https://my.home-assistant.io/redirect/marketplace_repository/?owner=RomRider&repository=apexcharts-card",
+    },
+    "Vertical Stack In Card": {
+        "path": "/config/www/community/vertical-stack-in-card",
+        "url": "https://my.home-assistant.io/redirect/marketplace_repository/?owner=ofekashery&repository=vertical-stack-in-card",
+    },
+    "Energy Flow Card Plus": {
+        "path": "/config/www/community/energy-flow-card-plus",
+        "url": "https://my.home-assistant.io/redirect/marketplace_repository/?owner=flixlix&repository=energy-flow-card-plus",
+    },
+    "Bubble Card": {
+        "path": "/config/www/community/Bubble-Card",
+        "url": "https://my.home-assistant.io/redirect/marketplace_repository/?owner=Clooos&repository=Bubble-Card",
+    },
+}
 
 
 def install_sem_files(base: str, data: bytes) -> None:
@@ -62,7 +80,7 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     def __init__(self):
         self.nordpool_verified = False
-        self.hacs_verified = False
+        self.marketplace_verified = False
         self.smhi_verified = False
         self.ai_done = False
         self.yaml_done = False
@@ -112,12 +130,12 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
 
             if user_input.get("official_nordpool_installed"):
-                return await self.async_step_hacs()
+                return await self.async_step_marketplace()
 
             if nordpool_ok:
 
                 if self.nordpool_verified:
-                    return await self.async_step_hacs()
+                    return await self.async_step_marketplace()
 
                 self.nordpool_verified = True
 
@@ -150,46 +168,30 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     # ─────────────────────────────
-    # HACS
+    # MARKETPLACE
     # ─────────────────────────────
-    async def async_step_hacs(self, user_input=None):
+    async def async_step_marketplace(self, user_input=None):
 
-        def check(path):
-            return os.path.isdir(path)
+        missing = [
+            name
+            for name, card in MARKETPLACE_CARDS.items()
+            if not os.path.isdir(card["path"])
+        ]
 
-        apex_ok = check("/config/www/community/apexcharts-card")
-        layout_ok = check("/config/www/community/lovelace-layout-card")
-        vertical_ok = check("/config/www/community/vertical-stack-in-card")
-        energy_ok = check("/config/www/community/energy-flow-card-plus")
-        bubble_ok = check("/config/www/community/Bubble-Card")
-
-        missing = []
-
-        if not apex_ok:
-            missing.append("• ApexCharts Card")
-
-        if not layout_ok:
-            missing.append("• layout-card")
-
-        if not vertical_ok:
-            missing.append("• Vertical Stack In Card")
-
-        if not energy_ok:
-            missing.append("• Energy Flow Card Plus")
-
-        if not bubble_ok:
-            missing.append("• Bubble Card")
-
-        all_ok = len(missing) == 0
+        all_ok = not missing
 
         status = (
-            "🟡 Nödvändiga HACS-integrationer hittade.\n\n" 
-            "Klicka på bekräfta för att validera dina integrationer."
+            "🟡 Alla nödvändiga frontend-kort hittades i Marketplace.\n\n"
+            "Klicka på bekräfta för att validera installationerna."
             if all_ok
             else (
-                "🔴 Följande HACS-integrationer saknas:\n\n"
-                + "\n".join(missing)
-                + "\n\nInstallera dessa via HACS innan du klickar bekräfta."
+                "🔴 Följande frontend-kort saknas i Marketplace:\n\n"
+                + "\n".join(
+                    f"• {name} – [Klicka här för att installera]({MARKETPLACE_CARDS[name]['url']})"
+                    for name in missing
+                )
+                + "\n\nÖppna länkarna för att installera korten via Marketplace. "
+                "Gå sedan tillbaka till SEM och klicka på bekräfta för att kontrollera igen."
             )
         )
 
@@ -197,30 +199,30 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
             if all_ok:
 
-                if self.hacs_verified:
+                if self.marketplace_verified:
                     return await self.async_step_smhi()
 
-                self.hacs_verified = True
+                self.marketplace_verified = True
 
                 return self.async_show_form(
-                    step_id="hacs",
+                    step_id="marketplace",
                     data_schema=vol.Schema({}),
                     description_placeholders={
                         "status": (
-                            "🟢 HACS-integrationerna är validerade och godkända.\n\n"
+                            "🟢 Alla nödvändiga frontend-kort är installerade och validerade.\n\n"
                             "Klicka på bekräfta för att fortsätta installationen."
                         )
                     }
                 )
 
             return self.async_show_form(
-                step_id="hacs",
+                step_id="marketplace",
                 data_schema=vol.Schema({}),
                 description_placeholders={"status": status}
             )
 
         return self.async_show_form(
-            step_id="hacs",
+            step_id="marketplace",
             data_schema=vol.Schema({}),
             description_placeholders={"status": status}
         )

@@ -16,6 +16,10 @@
           "official_nordpool_installed": "Jag använder den officiella Nord Pool-integrationen"
         }
       },
+      "marketplace": {
+        "title": "Installera frontend-kort via Marketplace",
+        "description": "{status}"
+      },
       "smhi": {
         "title": "Konfiguera SMHI",
         "description": "{status}"
