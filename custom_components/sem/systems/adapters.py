@@ -3,6 +3,7 @@
 from .adapter import SemSystemAdapter
 from .huawei import HuaweiSolarAdapter
 from .solax import SolaXAdapter
+from .solis import SolisAdapter
 
 
 def create_system_adapters() -> list[SemSystemAdapter]:
@@ -10,4 +11,5 @@ def create_system_adapters() -> list[SemSystemAdapter]:
     return [
         HuaweiSolarAdapter(),
         SolaXAdapter(),
+        SolisAdapter(),
     ]
