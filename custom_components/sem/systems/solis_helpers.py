@@ -14,6 +14,9 @@ SOLIS_SOURCE_OPTION_TO_MODE = {
     option: mode for mode, option in SOLIS_MODE_TO_SOURCE_OPTION.items()
 }
 
+SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY = "end_of_discharge_soc"
+SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY = "battery_minimum_soc"
+
 SOLIS_TOU_NUMBER_FIELDS = (
     "timed_charge_start_hours",
     "timed_charge_start_minutes",

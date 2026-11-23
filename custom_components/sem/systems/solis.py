@@ -17,6 +17,8 @@ from .adapter import SemSystemAdapter
 from .capabilities import EntityCapability, SystemCapabilities
 from .registry import EntitySource, SemEntityRegistry
 from .solis_helpers import (
+    SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY,
+    SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY,
     SOLIS_MODE_TO_SOURCE_OPTION,
     SOLIS_SOURCE_OPTION_TO_MODE,
     SOLIS_TOU_BUTTON_ENTITY_KEYS,
@@ -34,6 +36,7 @@ SOLIS_SUPPORTED_PLUGINS = frozenset({"solis"})
 
 SOLIS_ENTITY_KEYS = (
     "battery_working_mode",
+    SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY,
     *SOLIS_TOU_NUMBER_ENTITY_KEYS,
     *SOLIS_TOU_BUTTON_ENTITY_KEYS,
 )
@@ -42,6 +45,11 @@ SOLIS_CAPABILITIES = SystemCapabilities(
     entities={
         "battery_working_mode": EntityCapability(
             required=True,
+            readable=True,
+            writable=True,
+        ),
+        SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY: EntityCapability(
+            required=False,
             readable=True,
             writable=True,
         ),
@@ -361,6 +369,10 @@ class SolisAdapter(SemSystemAdapter):
             "battery_working_mode": (
                 "select",
                 "energy_storage_control_switch",
+            ),
+            SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY: (
+                "number",
+                SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY,
             ),
             **{
                 key: ("number", key)

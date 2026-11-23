@@ -17,10 +17,21 @@ assert SPEC is not None and SPEC.loader is not None
 solis_helpers = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(solis_helpers)
 
+SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY = (
+    solis_helpers.SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY
+)
+SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY = (
+    solis_helpers.SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY
+)
 SOLIS_MODE_TO_SOURCE_OPTION = solis_helpers.SOLIS_MODE_TO_SOURCE_OPTION
 SOLIS_TOU_NUMBER_ENTITY_KEYS = solis_helpers.SOLIS_TOU_NUMBER_ENTITY_KEYS
 build_solis_time_values = solis_helpers.build_solis_time_values
 parse_solis_tou_periods = solis_helpers.parse_solis_tou_periods
+
+
+def test_end_of_discharge_soc_maps_to_battery_minimum_soc() -> None:
+    assert SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY == "end_of_discharge_soc"
+    assert SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY == "battery_minimum_soc"
 
 
 def test_sem_modes_map_to_solis_options() -> None:
