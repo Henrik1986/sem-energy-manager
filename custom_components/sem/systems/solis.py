@@ -1933,6 +1933,33 @@ class SolisAdapter(SemSystemAdapter):
                 "Solis Backflow Power number entities are not fully resolved"
             )
 
+        # The plugin exposes the built-in EPM registers. Solis documents this
+        # control for single-inverter plants; multi-inverter plants require an
+        # external EPM with one aggregate export setting, not one per inverter.
+        if len(device_ids) != 1:
+            raise HomeAssistantError(
+                "Solis built-in Backflow Power control is supported only for a "
+                "single inverter. Multi-inverter systems require an external "
+                "EPM, which is not controlled by this adapter."
+            )
+
+        meter_sources = registry.get_entity_sources(
+            self.system_id,
+            SOLIS_POWER_METER_ENTITY_KEY,
+        )
+        if (
+            registry.get_entity_status(
+                self.system_id,
+                SOLIS_POWER_METER_ENTITY_KEY,
+            ) != "found"
+            or len(meter_sources) != 1
+            or meter_sources[0].device_id != device_ids[0]
+        ):
+            raise HomeAssistantError(
+                "Solis Backflow Power control requires one resolved meter "
+                "source on the inverter."
+            )
+
         number_entities = self._require_device_entities(
             hass,
             registry,
