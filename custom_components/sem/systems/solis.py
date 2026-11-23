@@ -28,6 +28,7 @@ from .solis_helpers import (
     SOLIS_TOU_BUTTON_ENTITY_KEYS,
     SOLIS_TOU_NUMBER_ENTITY_KEYS,
     build_solis_time_values,
+    build_solis_discharge_current_values,
     parse_solis_tou_periods,
     solis_grid_charge_blocked_option,
 )
@@ -47,10 +48,23 @@ SOLIS_GRID_CHARGE_NUMBER_METADATA = {
     "unit_of_measurement": "W",
     "mode": "box",
 }
+SOLIS_MAXIMUM_DISCHARGING_POWER_KEY = "maximum_discharging_power"
+SOLIS_MAXIMUM_DISCHARGING_STORE_VERSION = 1
+SOLIS_MAXIMUM_DISCHARGING_NUMBER_METADATA = {
+    "min_value": 0,
+    "max_value": 100_000,
+    "step": 1,
+    "unit_of_measurement": "W",
+    "mode": "box",
+}
+SOLIS_MAXIMUM_DISCHARGING_CURRENT_ENTITY_KEY = "maximum_discharging_current"
+SOLIS_BATTERY_VOLTAGE_ENTITY_KEY = "battery_voltage"
 
 SOLIS_ENTITY_KEYS = (
     "battery_working_mode",
     SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY,
+    SOLIS_MAXIMUM_DISCHARGING_CURRENT_ENTITY_KEY,
+    SOLIS_BATTERY_VOLTAGE_ENTITY_KEY,
     *SOLIS_TOU_NUMBER_ENTITY_KEYS,
     *SOLIS_TOU_BUTTON_ENTITY_KEYS,
 )
@@ -71,6 +85,21 @@ SOLIS_CAPABILITIES = SystemCapabilities(
             required=False,
             readable=True,
             writable=True,
+        ),
+        SOLIS_MAXIMUM_DISCHARGING_POWER_KEY: EntityCapability(
+            required=False,
+            readable=True,
+            writable=True,
+        ),
+        SOLIS_MAXIMUM_DISCHARGING_CURRENT_ENTITY_KEY: EntityCapability(
+            required=False,
+            readable=True,
+            writable=True,
+        ),
+        SOLIS_BATTERY_VOLTAGE_ENTITY_KEY: EntityCapability(
+            required=False,
+            readable=True,
+            writable=False,
         ),
         **{
             key: EntityCapability(
@@ -269,6 +298,9 @@ class SolisAdapter(SemSystemAdapter):
         self._grid_charge_value: float | None = None
         self._grid_charge_override: dict[str, Any] | None = None
         self._grid_charge_lock = asyncio.Lock()
+        self._maximum_discharging_power_store: Store | None = None
+        self._maximum_discharging_power_value: float | None = None
+        self._maximum_discharging_power_lock = asyncio.Lock()
 
     async def async_setup(
         self,
@@ -298,6 +330,26 @@ class SolisAdapter(SemSystemAdapter):
             stored_override = stored_grid_charge.get("override")
             if isinstance(stored_override, dict):
                 self._grid_charge_override = stored_override
+
+        self._maximum_discharging_power_store = Store(
+            hass,
+            SOLIS_MAXIMUM_DISCHARGING_STORE_VERSION,
+            f"{SOLIS_SYSTEM_ID}_maximum_discharging_power",
+        )
+        stored_maximum_discharging_power = (
+            await self._maximum_discharging_power_store.async_load()
+        )
+        if isinstance(stored_maximum_discharging_power, Mapping):
+            try:
+                stored_value = float(stored_maximum_discharging_power.get("value"))
+            except (TypeError, ValueError):
+                stored_value = None
+            if (
+                stored_value is not None
+                and math.isfinite(stored_value)
+                and stored_value >= 0
+            ):
+                self._maximum_discharging_power_value = stored_value
 
         entries = [
             entry
@@ -351,6 +403,17 @@ class SolisAdapter(SemSystemAdapter):
             except HomeAssistantError:
                 _LOGGER.exception(
                     "Could not reapply the saved Solis grid-charge block"
+                )
+        if self._maximum_discharging_power_value is not None:
+            try:
+                await self._apply_maximum_discharging_power(
+                    hass,
+                    registry,
+                    self._maximum_discharging_power_value,
+                )
+            except HomeAssistantError:
+                _LOGGER.exception(
+                    "Could not reapply the saved Solis maximum discharge power"
                 )
 
     def _mark_all_entities_missing(
@@ -428,6 +491,14 @@ class SolisAdapter(SemSystemAdapter):
                 "number",
                 SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY,
             ),
+            SOLIS_MAXIMUM_DISCHARGING_CURRENT_ENTITY_KEY: (
+                "number",
+                "battery_discharge_current",
+            ),
+            SOLIS_BATTERY_VOLTAGE_ENTITY_KEY: (
+                "sensor",
+                "battery_voltage",
+            ),
             **{
                 key: ("number", key)
                 for key in SOLIS_TOU_NUMBER_ENTITY_KEYS
@@ -490,21 +561,26 @@ class SolisAdapter(SemSystemAdapter):
 
     def has_virtual_number(self, entity_key: str) -> bool:
         """Expose the grid-charge permission as an adapter-managed number."""
-        return (
-            entity_key == SOLIS_GRID_CHARGE_MAXIMUM_POWER_KEY
-            and self._grid_charge_override_supported()
-        )
+        if entity_key == SOLIS_GRID_CHARGE_MAXIMUM_POWER_KEY:
+            return self._grid_charge_override_supported()
+        if entity_key == SOLIS_MAXIMUM_DISCHARGING_POWER_KEY:
+            return self._maximum_discharging_power_supported()
+        return False
 
     def get_virtual_number_value(self, entity_key: str) -> float | None:
         """Return the configured Solis grid-charge permission value."""
         if entity_key == SOLIS_GRID_CHARGE_MAXIMUM_POWER_KEY:
             return self._grid_charge_value
+        if entity_key == SOLIS_MAXIMUM_DISCHARGING_POWER_KEY:
+            return self._maximum_discharging_power_value
         return None
 
     def get_virtual_number_metadata(self, entity_key: str) -> dict[str, Any]:
         """Expose the watt-based SEM number range."""
         if entity_key == SOLIS_GRID_CHARGE_MAXIMUM_POWER_KEY:
             return dict(SOLIS_GRID_CHARGE_NUMBER_METADATA)
+        if entity_key == SOLIS_MAXIMUM_DISCHARGING_POWER_KEY:
+            return dict(SOLIS_MAXIMUM_DISCHARGING_NUMBER_METADATA)
         return {}
 
     def _grid_charge_mode_entities(
@@ -723,6 +799,261 @@ class SolisAdapter(SemSystemAdapter):
         }
         await self._set_working_mode_options(hass, options_by_entity)
 
+
+    def _maximum_discharging_device_ids(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+    ) -> list[str]:
+        """Return battery inverter IDs resolved through working-mode entities."""
+        if registry.get_entity_status(
+            self.system_id,
+            "battery_working_mode",
+        ) != "found":
+            raise HomeAssistantError(
+                "Solis battery working-mode entities are not fully resolved"
+            )
+        sources = registry.get_entity_sources(
+            self.system_id,
+            "battery_working_mode",
+        )
+        device_ids = [source.device_id for source in sources]
+        if (
+            not device_ids
+            or any(device_id is None for device_id in device_ids)
+            or len(set(device_ids)) != len(device_ids)
+        ):
+            raise HomeAssistantError(
+                "Solis working-mode sources do not map one-to-one "
+                "to battery inverters"
+            )
+        return sorted(device_ids)
+
+    def _maximum_discharging_power_supported(self) -> bool:
+        """Require voltage telemetry and a writable current number per inverter."""
+        if self._hass is None or self._registry is None:
+            return False
+        try:
+            device_ids = self._maximum_discharging_device_ids(
+                self._hass,
+                self._registry,
+            )
+            self._require_device_entities(
+                self._hass,
+                self._registry,
+                entity_key=SOLIS_MAXIMUM_DISCHARGING_CURRENT_ENTITY_KEY,
+                domain="number",
+                device_ids=device_ids,
+            )
+            voltage_entities = self._require_device_entities(
+                self._hass,
+                self._registry,
+                entity_key=SOLIS_BATTERY_VOLTAGE_ENTITY_KEY,
+                domain="sensor",
+                device_ids=device_ids,
+            )
+            for entity_id in voltage_entities.values():
+                state = self._hass.states.get(entity_id)
+                if state is None or state.state in ("unknown", "unavailable"):
+                    return False
+                if state.attributes.get("unit_of_measurement") not in ("V", "volt"):
+                    return False
+                voltage = float(state.state)
+                if not math.isfinite(voltage) or voltage <= 0:
+                    return False
+            return True
+        except (HomeAssistantError, TypeError, ValueError):
+            return False
+
+    async def _save_maximum_discharging_power_state(self) -> None:
+        """Persist the plant discharge-power ceiling across restarts."""
+        if self._maximum_discharging_power_store is None:
+            return
+        await self._maximum_discharging_power_store.async_save(
+            {"value": self._maximum_discharging_power_value}
+        )
+
+    async def _apply_maximum_discharging_power(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        maximum_power_w: float,
+    ) -> None:
+        """Convert the total W ceiling into current limits for all battery inverters."""
+        device_ids = self._maximum_discharging_device_ids(hass, registry)
+        current_entities = self._require_device_entities(
+            hass,
+            registry,
+            entity_key=SOLIS_MAXIMUM_DISCHARGING_CURRENT_ENTITY_KEY,
+            domain="number",
+            device_ids=device_ids,
+        )
+        voltage_entities = self._require_device_entities(
+            hass,
+            registry,
+            entity_key=SOLIS_BATTERY_VOLTAGE_ENTITY_KEY,
+            domain="sensor",
+            device_ids=device_ids,
+        )
+
+        voltages: dict[str, float] = {}
+        current_limits: dict[str, dict[str, float]] = {}
+        previous_values: dict[str, float] = {}
+        for device_id in device_ids:
+            voltage_state = hass.states.get(voltage_entities[device_id])
+            current_state = hass.states.get(current_entities[device_id])
+            if (
+                voltage_state is None
+                or current_state is None
+                or voltage_state.state in ("unknown", "unavailable")
+                or current_state.state in ("unknown", "unavailable")
+            ):
+                raise HomeAssistantError(
+                    f"Solis battery data is unavailable for inverter {device_id}"
+                )
+            if voltage_state.attributes.get("unit_of_measurement") not in ("V", "volt"):
+                raise HomeAssistantError(
+                    f"Solis battery voltage {voltage_entities[device_id]} "
+                    "does not use volts"
+                )
+            if current_state.attributes.get("unit_of_measurement") not in ("A", "ampere"):
+                raise HomeAssistantError(
+                    f"Solis discharge current {current_entities[device_id]} "
+                    "does not use amperes"
+                )
+            try:
+                voltage = float(voltage_state.state)
+                current = float(current_state.state)
+                limits = {
+                    "min": float(current_state.attributes["min"]),
+                    "max": float(current_state.attributes["max"]),
+                    "step": float(current_state.attributes["step"]),
+                }
+            except (KeyError, TypeError, ValueError) as err:
+                raise HomeAssistantError(
+                    f"Solis battery voltage or discharge-current limits are "
+                    f"invalid for inverter {device_id}"
+                ) from err
+            if (
+                not math.isfinite(voltage)
+                or voltage <= 0
+                or not math.isfinite(current)
+                or not all(math.isfinite(item) for item in limits.values())
+                or limits["min"] > limits["max"]
+                or limits["step"] <= 0
+            ):
+                raise HomeAssistantError(
+                    f"Solis battery voltage or discharge-current limits are "
+                    f"invalid for inverter {device_id}"
+                )
+            voltages[device_id] = voltage
+            current_limits[device_id] = limits
+            previous_values[current_entities[device_id]] = current
+
+        try:
+            target_values = build_solis_discharge_current_values(
+                maximum_power_w,
+                voltages,
+                current_limits,
+            )
+        except ValueError as err:
+            raise HomeAssistantError(str(err)) from err
+
+        changed: dict[str, float] = {}
+        for device_id, target_current in target_values.items():
+            entity_id = current_entities[device_id]
+            if not math.isclose(
+                previous_values[entity_id],
+                target_current,
+                rel_tol=0.0,
+                abs_tol=1e-6,
+            ):
+                changed[entity_id] = target_current
+
+        if not changed:
+            return
+        if not hass.services.has_service("number", "set_value"):
+            raise HomeAssistantError(
+                "Home Assistant number.set_value service is not available"
+            )
+
+        results = await asyncio.gather(
+            *(
+                hass.services.async_call(
+                    "number",
+                    "set_value",
+                    {"entity_id": entity_id, "value": target_current},
+                    blocking=True,
+                )
+                for entity_id, target_current in changed.items()
+            ),
+            return_exceptions=True,
+        )
+        failures = [
+            f"{entity_id}: {result}"
+            for entity_id, result in zip(changed, results)
+            if isinstance(result, Exception)
+        ]
+        if failures:
+            rollback_results = await asyncio.gather(
+                *(
+                    hass.services.async_call(
+                        "number",
+                        "set_value",
+                        {"entity_id": entity_id, "value": previous_values[entity_id]},
+                        blocking=True,
+                    )
+                    for entity_id in changed
+                ),
+                return_exceptions=True,
+            )
+            rollback_failures = [
+                f"{entity_id}: {result}"
+                for entity_id, result in zip(changed, rollback_results)
+                if isinstance(result, Exception)
+            ]
+            message = (
+                "Solis maximum discharge power could not be applied to every "
+                "battery inverter: " + "; ".join(failures)
+            )
+            if rollback_failures:
+                message += (
+                    ". Rollback also failed for: "
+                    + "; ".join(rollback_failures)
+                )
+            raise HomeAssistantError(message)
+
+    async def _async_set_maximum_discharging_power(
+        self,
+        hass: HomeAssistant,
+        registry: SemEntityRegistry,
+        value: float,
+    ) -> None:
+        """Set and persist the requested total Solis battery discharge power."""
+        if (
+            not isinstance(value, (int, float))
+            or not math.isfinite(value)
+            or value < 0
+        ):
+            raise HomeAssistantError(
+                "Solis maximum discharge power must be a finite non-negative number"
+            )
+        if not self._maximum_discharging_power_supported():
+            raise HomeAssistantError(
+                "Solis maximum discharge power requires an enabled Battery "
+                "Discharge Current number and Battery Voltage sensor on every "
+                "battery inverter"
+            )
+
+        async with self._maximum_discharging_power_lock:
+            await self._apply_maximum_discharging_power(
+                hass,
+                registry,
+                float(value),
+            )
+            self._maximum_discharging_power_value = float(value)
+            await self._save_maximum_discharging_power_state()
+
     async def async_set_number_value(
         self,
         hass: HomeAssistant,
@@ -731,6 +1062,13 @@ class SolisAdapter(SemSystemAdapter):
         value: float,
     ) -> bool:
         """Block grid charging at zero and restore the previous mode above zero."""
+        if entity_key == SOLIS_MAXIMUM_DISCHARGING_POWER_KEY:
+            await self._async_set_maximum_discharging_power(
+                hass,
+                registry,
+                value,
+            )
+            return True
         if entity_key != SOLIS_GRID_CHARGE_MAXIMUM_POWER_KEY:
             return False
         if (

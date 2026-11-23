@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 import re
+from collections.abc import Mapping
 
 
 SOLIS_MODE_TO_SOURCE_OPTION = {
@@ -160,3 +162,81 @@ def build_solis_time_values(
             values[f"{prefix}_end_minutes{suffix}"] = end_minute
 
     return values
+
+
+def build_solis_discharge_current_values(
+    maximum_power_w: float,
+    voltage_by_device: Mapping[str, float],
+    current_limits_by_device: Mapping[str, Mapping[str, float]],
+) -> dict[str, float]:
+    """Convert a plant discharge-power ceiling into safe inverter current limits."""
+    if (
+        not isinstance(maximum_power_w, (int, float))
+        or not math.isfinite(maximum_power_w)
+        or maximum_power_w < 0
+    ):
+        raise ValueError(
+            "Maximum discharge power must be a finite non-negative number"
+        )
+    if (
+        not voltage_by_device
+        or set(voltage_by_device) != set(current_limits_by_device)
+    ):
+        raise ValueError(
+            "Battery voltage and discharge-current sources must match"
+        )
+
+    power_per_device = maximum_power_w / len(voltage_by_device)
+    result: dict[str, float] = {}
+    for device_id, voltage in voltage_by_device.items():
+        if (
+            not isinstance(voltage, (int, float))
+            or not math.isfinite(voltage)
+            or voltage <= 0
+        ):
+            raise ValueError(
+                f"Invalid battery voltage for Solis inverter {device_id}"
+            )
+
+        limits = current_limits_by_device[device_id]
+        try:
+            minimum = float(limits["min"])
+            maximum = float(limits["max"])
+            step = float(limits["step"])
+        except (KeyError, TypeError, ValueError) as err:
+            raise ValueError(
+                f"Invalid discharge-current limits for Solis inverter {device_id}"
+            ) from err
+        if (
+            not all(math.isfinite(item) for item in (minimum, maximum, step))
+            or minimum > maximum
+            or step <= 0
+        ):
+            raise ValueError(
+                f"Invalid discharge-current range for Solis inverter {device_id}"
+            )
+
+        requested_current = power_per_device / float(voltage)
+        if requested_current < minimum and minimum > 0:
+            raise ValueError(
+                f"Requested discharge power is below the minimum current "
+                f"setting for Solis inverter {device_id}"
+            )
+        if maximum_power_w == 0:
+            if minimum > 0:
+                raise ValueError(
+                    f"Solis inverter {device_id} cannot set zero discharge current"
+                )
+            result[device_id] = 0.0
+            continue
+
+        bounded_current = min(requested_current, maximum)
+        steps = math.floor((bounded_current - minimum + 1e-9) / step)
+        target_current = minimum + max(0, steps) * step
+        if target_current > maximum:
+            target_current = minimum + math.floor(
+                (maximum - minimum + 1e-9) / step
+            ) * step
+        result[device_id] = round(target_current, 6)
+
+    return result

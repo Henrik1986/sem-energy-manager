@@ -33,6 +33,9 @@ solis_grid_charge_blocked_option = solis_helpers.solis_grid_charge_blocked_optio
 SOLIS_MODE_TO_SOURCE_OPTION = solis_helpers.SOLIS_MODE_TO_SOURCE_OPTION
 SOLIS_TOU_NUMBER_ENTITY_KEYS = solis_helpers.SOLIS_TOU_NUMBER_ENTITY_KEYS
 build_solis_time_values = solis_helpers.build_solis_time_values
+build_solis_discharge_current_values = (
+    solis_helpers.build_solis_discharge_current_values
+)
 parse_solis_tou_periods = solis_helpers.parse_solis_tou_periods
 
 
@@ -181,3 +184,51 @@ def test_all_local_number_keys_match_three_eight_value_slots() -> None:
     assert "timed_charge_start_hours" in SOLIS_TOU_NUMBER_ENTITY_KEYS
     assert "timed_charge_start_hours_2" in SOLIS_TOU_NUMBER_ENTITY_KEYS
     assert "timed_charge_start_hours_3" in SOLIS_TOU_NUMBER_ENTITY_KEYS
+
+
+def test_discharge_power_is_split_and_converted_to_current() -> None:
+    values = build_solis_discharge_current_values(
+        6_000,
+        {"inv-1": 400, "inv-2": 500},
+        {
+            "inv-1": {"min": 0, "max": 100, "step": 1},
+            "inv-2": {"min": 0, "max": 100, "step": 1},
+        },
+    )
+    assert values == {"inv-1": 7.0, "inv-2": 6.0}
+    assert (
+        values["inv-1"] * 400 + values["inv-2"] * 500
+        <= 6_000
+    )
+
+
+def test_zero_discharge_power_sets_zero_current() -> None:
+    values = build_solis_discharge_current_values(
+        0,
+        {"inv-1": 400},
+        {"inv-1": {"min": 0, "max": 100, "step": 1}},
+    )
+    assert values == {"inv-1": 0.0}
+
+
+def test_discharge_current_is_limited_to_source_maximum() -> None:
+    values = build_solis_discharge_current_values(
+        20_000,
+        {"inv-1": 400},
+        {"inv-1": {"min": 0, "max": 20, "step": 1}},
+    )
+    assert values == {"inv-1": 20.0}
+
+
+def test_discharge_power_rejects_invalid_voltage_or_limits() -> None:
+    invalid_cases = (
+        (0, {"inv-1": 0}, {"inv-1": {"min": 0, "max": 100, "step": 1}}),
+        (1_000, {"inv-1": 400}, {"inv-1": {"min": 0, "max": 100, "step": 0}}),
+        (1_000, {"inv-1": 400}, {"inv-2": {"min": 0, "max": 100, "step": 1}}),
+    )
+    for power, voltages, limits in invalid_cases:
+        try:
+            build_solis_discharge_current_values(power, voltages, limits)
+        except ValueError:
+            continue
+        raise AssertionError("Expected invalid discharge-power inputs to fail")
