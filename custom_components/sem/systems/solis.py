@@ -22,6 +22,8 @@ from .registry import EntitySource, SemEntityRegistry
 from .solis_helpers import (
     SOLIS_BATTERY_SOC_ENTITY_KEY,
     SOLIS_BATTERY_SOC_SOURCE_KEY,
+    SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY,
+    SOLIS_INVERTER_INPUT_POWER_SOURCE_KEY,
     SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY,
     SOLIS_TOTAL_CAPACITY_HELPER,
     SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY,
@@ -38,6 +40,7 @@ from .solis_helpers import (
     solis_grid_charge_blocked_option,
     solis_battery_soc_value,
     solis_total_capacity_kwh,
+    sum_solis_pv_power,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -70,6 +73,7 @@ SOLIS_BATTERY_VOLTAGE_ENTITY_KEY = "battery_voltage"
 SOLIS_ENTITY_KEYS = (
     "battery_working_mode",
     SOLIS_BATTERY_SOC_ENTITY_KEY,
+    SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY,
     SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY,
     SOLIS_MAXIMUM_DISCHARGING_CURRENT_ENTITY_KEY,
     SOLIS_BATTERY_VOLTAGE_ENTITY_KEY,
@@ -85,6 +89,11 @@ SOLIS_CAPABILITIES = SystemCapabilities(
             writable=True,
         ),
         SOLIS_BATTERY_SOC_ENTITY_KEY: EntityCapability(
+            required=True,
+            readable=True,
+            writable=False,
+        ),
+        SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY: EntityCapability(
             required=True,
             readable=True,
             writable=False,
@@ -546,6 +555,25 @@ class SolisAdapter(SemSystemAdapter):
                 expected_device_ids=battery_device_ids,
             )
 
+        # PV production is measured once per inverter, including units without
+        # a battery. pv_total_power already combines the inverter's PV strings.
+        pv_power_matches = [
+            entry
+            for entry in entity_entries
+            if entry.domain == "sensor"
+            and _entity_key_matches(
+                entry.unique_id,
+                SOLIS_INVERTER_INPUT_POWER_SOURCE_KEY,
+            )
+        ]
+        _resolve_expected_sources(
+            registry,
+            device_registry,
+            entity_key=SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY,
+            matches=pv_power_matches,
+            expected_device_ids=inverter_device_ids,
+        )
+
     def get_sensor_value(
         self,
         entity_key: str,
@@ -559,6 +587,38 @@ class SolisAdapter(SemSystemAdapter):
             if helper_state is None:
                 return None
             return solis_total_capacity_kwh(helper_state.state)
+
+        if entity_key == SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY:
+            if not source_states or any(
+                state is None or state.state in ("unknown", "unavailable")
+                for state in source_states
+            ):
+                return None
+
+            if (
+                self._registry is None
+                or self._registry.get_entity_status(
+                    self.system_id,
+                    SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY,
+                ) != "found"
+            ):
+                return None
+
+            sources = self._registry.get_entity_sources(
+                self.system_id,
+                SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY,
+            )
+            device_ids = [source.device_id for source in sources]
+            if (
+                len(sources) != len(source_states)
+                or any(device_id is None for device_id in device_ids)
+                or len(set(device_ids)) != len(device_ids)
+            ):
+                return None
+
+            return sum_solis_pv_power(
+                [state.state for state in source_states if state is not None]
+            )
 
         if entity_key != SOLIS_BATTERY_SOC_ENTITY_KEY:
             return super().get_sensor_value(entity_key, source_states)
@@ -616,6 +676,13 @@ class SolisAdapter(SemSystemAdapter):
                 "device_class": "energy",
                 "unit_of_measurement": "kWh",
                 "suggested_display_precision": 2,
+            }
+        if entity_key == SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY:
+            return {
+                "device_class": "power",
+                "state_class": "measurement",
+                "unit_of_measurement": "W",
+                "suggested_display_precision": 0,
             }
         return super().get_sensor_metadata(entity_key, source_attributes)
 

@@ -18,6 +18,9 @@ solis_helpers = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(solis_helpers)
 
 SOLIS_BATTERY_SOC_ENTITY_KEY = solis_helpers.SOLIS_BATTERY_SOC_ENTITY_KEY
+SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY = solis_helpers.SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY
+SOLIS_INVERTER_INPUT_POWER_SOURCE_KEY = solis_helpers.SOLIS_INVERTER_INPUT_POWER_SOURCE_KEY
+sum_solis_pv_power = solis_helpers.sum_solis_pv_power
 SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY = (
     solis_helpers.SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY
 )
@@ -45,6 +48,20 @@ build_solis_discharge_current_values = (
     solis_helpers.build_solis_discharge_current_values
 )
 parse_solis_tou_periods = solis_helpers.parse_solis_tou_periods
+
+
+def test_inverter_input_power_maps_to_pv_total_power_per_inverter() -> None:
+    assert SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY == "inverter_input_power"
+    assert SOLIS_INVERTER_INPUT_POWER_SOURCE_KEY == "pv_total_power"
+
+
+def test_solis_pv_power_sums_all_inverter_readings() -> None:
+    assert sum_solis_pv_power(["1200", 2300, 0]) == 3500
+
+
+def test_solis_pv_power_rejects_incomplete_or_invalid_readings() -> None:
+    for values in ([], ["1000", "unavailable"], ["nan"], ["inf"], [-1], [True]):
+        assert sum_solis_pv_power(values) is None
 
 
 def test_battery_rated_capacity_maps_to_sem_helper() -> None:

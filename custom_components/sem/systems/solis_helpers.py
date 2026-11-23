@@ -21,11 +21,33 @@ SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY = "battery_minimum_soc"
 
 SOLIS_BATTERY_SOC_ENTITY_KEY = "battery_state_of_capacity"
 SOLIS_BATTERY_SOC_SOURCE_KEY = "battery_soc"
+SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY = "inverter_input_power"
+SOLIS_INVERTER_INPUT_POWER_SOURCE_KEY = "pv_total_power"
 SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY = "battery_rated_capacity"
 SOLIS_TOTAL_CAPACITY_HELPER = "input_number.sem_battery_total_capacity_kwh"
 
 SOLIS_GRID_CHARGE_MAXIMUM_POWER_ENTITY_KEY = "grid_charge_maximum_power"
 SOLIS_GRID_CHARGE_NO_GRID_SOURCE_OPTION = "Timed Charge/Discharge - No Grid Charging"
+
+def sum_solis_pv_power(values: Sequence[object]) -> float | None:
+    """Sum one valid non-negative PV power reading per Solis inverter."""
+    if not values:
+        return None
+
+    parsed: list[float] = []
+    for value in values:
+        if isinstance(value, bool):
+            return None
+        try:
+            numeric = float(value)
+        except (TypeError, ValueError):
+            return None
+        if not math.isfinite(numeric) or numeric < 0:
+            return None
+        parsed.append(numeric)
+
+    return sum(parsed)
+
 
 def solis_total_capacity_kwh(value: object) -> float | None:
     """Validate the user's configured total Solis battery capacity in kWh."""
