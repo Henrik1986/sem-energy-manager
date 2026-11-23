@@ -1,10 +1,10 @@
 # SEM 1.0.8 – Multi-system adapters
 
-> **Status:** Releaseunderlag, utkast  
+> **Release:** SEM 1.0.8  
 > **Aktuell betaversion:** 1.0.8-beta.2  
 > **Branch:** `feature/multi-system-solax-test`
 
-Det här dokumentet beskriver ändringarna som är tänkta att ingå när den kombinerade multi-system-versionen flyttas till `main`. Det är inte en bekräftelse på att en stabil release är publicerad. Slutlig versionsbeteckning fastställs inför releasen.
+Den här versionen introducerar SEM:s gemensamma multi-system-arkitektur och lägger till den första SolaX-adaptern.
 
 ## Nyheter
 
