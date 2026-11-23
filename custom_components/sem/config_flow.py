@@ -12,19 +12,19 @@ ZIP_URL = "https://github.com/Henrik1986/huawei-energy-managment/archive/refs/he
 MARKETPLACE_CARDS = {
     "ApexCharts Card": {
         "path": "/config/www/community/apexcharts-card",
-        "url": "https://my.home-assistant.io/redirect/hacs_repository/?owner=RomRider&repository=apexcharts-card",
+        "url": "https://my.home-assistant.io/redirect/marketplace_repository/?owner=RomRider&repository=apexcharts-card",
     },
     "Vertical Stack In Card": {
         "path": "/config/www/community/vertical-stack-in-card",
-        "url": "https://my.home-assistant.io/redirect/hacs_repository/?owner=thomasloven&repository=vertical-stack-in-card",
+        "url": "https://my.home-assistant.io/redirect/marketplace_repository/?owner=ofekashery&repository=vertical-stack-in-card",
     },
     "Energy Flow Card Plus": {
         "path": "/config/www/community/energy-flow-card-plus",
-        "url": "https://my.home-assistant.io/redirect/hacs_repository/?owner=flixlix&repository=energy-flow-card-plus",
+        "url": "https://my.home-assistant.io/redirect/marketplace_repository/?owner=flixlix&repository=energy-flow-card-plus",
     },
     "Bubble Card": {
         "path": "/config/www/community/Bubble-Card",
-        "url": "https://my.home-assistant.io/redirect/hacs_repository/?owner=Clooos&repository=Bubble-Card",
+        "url": "https://my.home-assistant.io/redirect/marketplace_repository/?owner=Clooos&repository=Bubble-Card",
     },
 }
 
