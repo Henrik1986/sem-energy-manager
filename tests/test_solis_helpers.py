@@ -18,6 +18,9 @@ solis_helpers = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(solis_helpers)
 
 SOLIS_BATTERY_SOC_ENTITY_KEY = solis_helpers.SOLIS_BATTERY_SOC_ENTITY_KEY
+SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY = solis_helpers.SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY
+SOLIS_TOTAL_CAPACITY_HELPER = solis_helpers.SOLIS_TOTAL_CAPACITY_HELPER
+solis_total_capacity_kwh = solis_helpers.solis_total_capacity_kwh
 SOLIS_BATTERY_SOC_SOURCE_KEY = solis_helpers.SOLIS_BATTERY_SOC_SOURCE_KEY
 solis_battery_soc_value = solis_helpers.solis_battery_soc_value
 SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY = (
@@ -40,6 +43,21 @@ build_solis_discharge_current_values = (
     solis_helpers.build_solis_discharge_current_values
 )
 parse_solis_tou_periods = solis_helpers.parse_solis_tou_periods
+
+
+def test_battery_rated_capacity_maps_to_sem_helper() -> None:
+    assert SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY == "battery_rated_capacity"
+    assert SOLIS_TOTAL_CAPACITY_HELPER == "input_number.sem_battery_total_capacity_kwh"
+
+
+def test_total_capacity_helper_accepts_positive_kwh_values() -> None:
+    assert solis_total_capacity_kwh("13.8") == 13.8
+    assert solis_total_capacity_kwh(20) == 20
+
+
+def test_total_capacity_helper_rejects_invalid_values() -> None:
+    for value in ("unknown", "unavailable", "nan", 0, -1, "inf"):
+        assert solis_total_capacity_kwh(value) is None
 
 
 def test_battery_soc_maps_to_standard_solis_sensor() -> None:

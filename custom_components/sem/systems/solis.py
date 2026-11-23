@@ -15,12 +15,16 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.storage import Store
 
+from .aggregation import parse_numeric
+
 from .adapter import SemSystemAdapter
 from .capabilities import EntityCapability, SystemCapabilities
 from .registry import EntitySource, SemEntityRegistry
 from .solis_helpers import (
     SOLIS_BATTERY_SOC_ENTITY_KEY,
     SOLIS_BATTERY_SOC_SOURCE_KEY,
+    SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY,
+    SOLIS_TOTAL_CAPACITY_HELPER,
     SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY,
     SOLIS_GRID_CHARGE_MAXIMUM_POWER_ENTITY_KEY,
     SOLIS_GRID_CHARGE_NO_GRID_SOURCE_OPTION,
@@ -34,6 +38,7 @@ from .solis_helpers import (
     parse_solis_tou_periods,
     solis_grid_charge_blocked_option,
     solis_battery_soc_value,
+    solis_total_capacity_kwh,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -82,6 +87,11 @@ SOLIS_CAPABILITIES = SystemCapabilities(
         ),
         SOLIS_BATTERY_SOC_ENTITY_KEY: EntityCapability(
             required=True,
+            readable=True,
+            writable=False,
+        ),
+        SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY: EntityCapability(
+            required=False,
             readable=True,
             writable=False,
         ),
@@ -542,7 +552,15 @@ class SolisAdapter(SemSystemAdapter):
         entity_key: str,
         source_states: Sequence[State | None],
     ) -> float | str | None:
-        """Return the battery-bank SOC using safe Solis source data."""
+        """Return Solis battery telemetry using safe source data."""
+        if entity_key == SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY:
+            if self._hass is None:
+                return None
+            helper_state = self._hass.states.get(SOLIS_TOTAL_CAPACITY_HELPER)
+            if helper_state is None:
+                return None
+            return solis_total_capacity_kwh(helper_state.state)
+
         if entity_key != SOLIS_BATTERY_SOC_ENTITY_KEY:
             return super().get_sensor_value(entity_key, source_states)
 
@@ -581,6 +599,26 @@ class SolisAdapter(SemSystemAdapter):
         return solis_battery_soc_value(
             [state.state for state in source_states if state is not None]
         )
+
+    def get_related_entity_ids(self, entity_key: str) -> list[str]:
+        """Return helper entities that affect derived Solis sensors."""
+        if entity_key == SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY:
+            return [SOLIS_TOTAL_CAPACITY_HELPER]
+        return []
+
+    def get_sensor_metadata(
+        self,
+        entity_key: str,
+        source_attributes: Sequence[Mapping[str, Any]],
+    ) -> dict[str, Any]:
+        """Expose the Solis battery capacity in the shared SEM kWh unit."""
+        if entity_key == SOLIS_BATTERY_RATED_CAPACITY_ENTITY_KEY:
+            return {
+                "device_class": "energy",
+                "unit_of_measurement": "kWh",
+                "suggested_display_precision": 2,
+            }
+        return super().get_sensor_metadata(entity_key, source_attributes)
 
     def _time_control_available(self) -> bool:
         """Require all local time values and all three update buttons."""
