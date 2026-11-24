@@ -87,12 +87,18 @@ SOLIS_BATTERY_DAY_CHARGE_SOURCE_KEY = "battery_charge_today"
 SOLIS_BATTERY_DAY_CHARGE_FALLBACK_ENTITY = (
     "sensor.sem_battery_charge_energy_daily"
 )
+SOLIS_BATTERY_DAY_DISCHARGE_ENTITY_KEY = "battery_day_discharge"
+SOLIS_BATTERY_DAY_DISCHARGE_SOURCE_KEY = "battery_discharge_today"
+SOLIS_BATTERY_DAY_DISCHARGE_FALLBACK_ENTITY = (
+    "sensor.sem_battery_discharge_energy_daily"
+)
 
 SOLIS_ENTITY_KEYS = (
     "battery_working_mode",
     SOLIS_BATTERY_SOC_ENTITY_KEY,
     SOLIS_BATTERY_POWER_ENTITY_KEY,
     SOLIS_BATTERY_DAY_CHARGE_ENTITY_KEY,
+    SOLIS_BATTERY_DAY_DISCHARGE_ENTITY_KEY,
     SOLIS_INVERTER_INPUT_POWER_ENTITY_KEY,
     SOLIS_POWER_METER_ENTITY_KEY,
     SOLIS_GRID_EXPORT_POWER_LIMIT_ENTITY_KEY,
@@ -147,6 +153,11 @@ SOLIS_CAPABILITIES = SystemCapabilities(
             writable=False,
         ),
         SOLIS_BATTERY_DAY_CHARGE_ENTITY_KEY: EntityCapability(
+            required=False,
+            readable=True,
+            writable=False,
+        ),
+        SOLIS_BATTERY_DAY_DISCHARGE_ENTITY_KEY: EntityCapability(
             required=False,
             readable=True,
             writable=False,
@@ -776,6 +787,10 @@ class SolisAdapter(SemSystemAdapter):
                 "sensor",
                 SOLIS_BATTERY_DAY_CHARGE_SOURCE_KEY,
             ),
+            SOLIS_BATTERY_DAY_DISCHARGE_ENTITY_KEY: (
+                "sensor",
+                SOLIS_BATTERY_DAY_DISCHARGE_SOURCE_KEY,
+            ),
             SOLIS_END_OF_DISCHARGE_SOC_ENTITY_KEY: (
                 "number",
                 SOLIS_END_OF_DISCHARGE_SOC_SOURCE_KEY,
@@ -927,6 +942,33 @@ class SolisAdapter(SemSystemAdapter):
                     SOLIS_BATTERY_DAY_CHARGE_FALLBACK_ENTITY,
                 )
 
+        # Prefer the Solis plugin's native daily battery-discharge sensor.
+        # Fall back to SEM's local daily energy sensor when it is unavailable.
+        if registry.get_entity_status(
+            self.system_id,
+            SOLIS_BATTERY_DAY_DISCHARGE_ENTITY_KEY,
+        ) != "found":
+            fallback_state = hass.states.get(
+                SOLIS_BATTERY_DAY_DISCHARGE_FALLBACK_ENTITY
+            )
+            if fallback_state is not None:
+                registry.set_entity_result(
+                    self.system_id,
+                    SOLIS_BATTERY_DAY_DISCHARGE_ENTITY_KEY,
+                    status="found",
+                    entity_id=SOLIS_BATTERY_DAY_DISCHARGE_FALLBACK_ENTITY,
+                    matches=[SOLIS_BATTERY_DAY_DISCHARGE_FALLBACK_ENTITY],
+                    sources=[
+                        EntitySource(
+                            entity_id=SOLIS_BATTERY_DAY_DISCHARGE_FALLBACK_ENTITY,
+                        )
+                    ],
+                )
+                _LOGGER.info(
+                    "Solis resolver: using local fallback %s for battery_day_discharge",
+                    SOLIS_BATTERY_DAY_DISCHARGE_FALLBACK_ENTITY,
+                )
+
     def get_sensor_value(
         self,
         entity_key: str,
@@ -971,6 +1013,55 @@ class SolisAdapter(SemSystemAdapter):
                 len(sources) == 1
                 and sources[0].entity_id
                 == SOLIS_BATTERY_DAY_CHARGE_FALLBACK_ENTITY
+                and sources[0].device_id is None
+            ):
+                return _finite_numeric(source_states[0].state)
+
+            device_ids = [source.device_id for source in sources]
+            if (
+                any(device_id is None for device_id in device_ids)
+                or len(set(device_ids)) != len(device_ids)
+            ):
+                return None
+
+            values = [
+                _finite_numeric(state.state)
+                for state in source_states
+            ]
+            if any(value is None for value in values):
+                return None
+            return sum(values)
+
+        if entity_key == SOLIS_BATTERY_DAY_DISCHARGE_ENTITY_KEY:
+            if not source_states or any(
+                state is None or state.state in ("unknown", "unavailable")
+                for state in source_states
+            ):
+                return None
+
+            if (
+                self._registry is None
+                or self._registry.get_entity_status(
+                    self.system_id,
+                    SOLIS_BATTERY_DAY_DISCHARGE_ENTITY_KEY,
+                ) != "found"
+            ):
+                return None
+
+            sources = self._registry.get_entity_sources(
+                self.system_id,
+                SOLIS_BATTERY_DAY_DISCHARGE_ENTITY_KEY,
+            )
+            if len(sources) != len(source_states):
+                return None
+
+            # The local SEM fallback is a single plant-level source without
+            # a physical inverter device. Native Solis sources must map
+            # one-to-one to distinct battery inverters before they are summed.
+            if (
+                len(sources) == 1
+                and sources[0].entity_id
+                == SOLIS_BATTERY_DAY_DISCHARGE_FALLBACK_ENTITY
                 and sources[0].device_id is None
             ):
                 return _finite_numeric(source_states[0].state)
@@ -1177,7 +1268,10 @@ class SolisAdapter(SemSystemAdapter):
                 "unit_of_measurement": "kWh",
                 "suggested_display_precision": 2,
             }
-        if entity_key == SOLIS_BATTERY_DAY_CHARGE_ENTITY_KEY:
+        if entity_key in {
+            SOLIS_BATTERY_DAY_CHARGE_ENTITY_KEY,
+            SOLIS_BATTERY_DAY_DISCHARGE_ENTITY_KEY,
+        }:
             return {
                 "device_class": "energy",
                 "state_class": "total_increasing",
