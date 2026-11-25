@@ -38,21 +38,22 @@ SEM kan samla flera Huawei-växelriktare och batterier till en gemensam anläggn
 
 I den här versionen behandlas samtliga aktiva Huawei Solar-anslutningar som en och samma SEM-anläggning. Använd därför inte denna funktion för två fristående Huawei-anläggningar.
 
+
 ## Installation
 
-1. Install **Smart Energy Manager (SEM)** through HACS.
-2. Restart Home Assistant and add SEM under **Settings → Devices & services → Add integration**.
-3. Follow the setup flow and verify the required integrations and frontend cards.
-4. Add the following under `homeassistant:` in `configuration.yaml`:
+1. Installera **Smart Energy Manager (SEM)** via HACS.
+2. Starta om Home Assistant och lägg till SEM under **Inställningar → Enheter och tjänster → Lägg till integration**.
+3. Följ installationsflödet och kontrollera att nödvändiga integrationer och frontend-kort finns installerade.
+4. Lägg till följande under `homeassistant:` i `configuration.yaml`:
 
 ```yaml
 homeassistant:
   packages: !include_dir_named custom_components/sem/resources/packages/sem
 ```
 
-If a `homeassistant:` section already exists, add the `packages:` entry to that section instead of creating a second one.
+Om ett `homeassistant:`-block redan finns ska du lägga till `packages:` under det befintliga blocket, inte skapa ett till.
 
-5. Register the SEM dashboard in `configuration.yaml`:
+5. Registrera SEM-dashboarden i `configuration.yaml`:
 
 ```yaml
 lovelace:
@@ -66,14 +67,14 @@ lovelace:
       filename: custom_components/sem/resources/dashboards/admin_view.yaml
 ```
 
-6. Check the Home Assistant configuration and restart Home Assistant.
+6. Kontrollera Home Assistant-konfigurationen och starta om Home Assistant.
 
-### Updates
+### Uppdateringar
 
-The integration code, package YAML files, scripts, data files and dashboard are shipped together in each SEM release. HACS installs the updated files as part of the integration update. Restart Home Assistant after updating so that the package YAML is loaded again.
+Integrationskoden, YAML-paketen, skripten, datafilerna och dashboarden levereras tillsammans i varje SEM-release. HACS installerar de uppdaterade filerna när integrationen uppdateras. Starta om Home Assistant efter uppdateringen så att de nya YAML-filerna läses in.
 
-SEM no longer downloads or updates package files separately from its dashboard.
+SEM laddar inte längre ner eller uppdaterar paketfiler separat från dashboarden.
 
-### Existing installations
+### Befintliga installationer
 
-Previous SEM versions may have copied package files to `/config/packages/sem` and the dashboard to `/config/dashboards`. Before switching to the paths above, check that the old copies are no longer included by your configuration. Do not load both the old and new copies in parallel. Back up any local modifications before removing or archiving old copies.
+Tidigare SEM-versioner kan ha kopierat paketfiler till `/config/packages/sem` och dashboarden till `/config/dashboards`. Kontrollera att de gamla kopiorna inte längre inkluderas i konfigurationen innan du byter till sökvägarna ovan. Ladda inte både de gamla och nya kopiorna parallellt. Säkerhetskopiera egna ändringar innan du tar bort eller arkiverar gamla kopior.
