@@ -5,7 +5,7 @@ command_line:
       scan_interval: 3610
       command_timeout: 60
       command: >-
-        sh /config/packages/sem/sem_solar_forecast.sh
+        sh /config/custom_components/sem/resources/packages/sem/sem_solar_forecast.sh
         {{ states('input_number.sem_solar_lat') }}
         {{ states('input_number.sem_solar_lon') }}
         {{ states('input_number.sem_solar_dec') }}
@@ -23,7 +23,7 @@ command_line:
       unique_id: sem_solar_forecast_script_test_2
       command_timeout: 60
       command: >-
-        sh /config/packages/sem/sem_solar_forecast.sh
+        sh /config/custom_components/sem/resources/packages/sem/sem_solar_forecast.sh
         {{ states('input_number.sem_solar_lat') }}
         {{ states('input_number.sem_solar_lon') }}
         {{ states('input_number.sem_solar_dec_2') }}
@@ -59,8 +59,7 @@ command_line:
       name: "sem_sys_state"
       unique_id: sem_sys_state
       command: >
-        curl -fsSL
-        https://raw.githubusercontent.com/Henrik1986/huawei-energy-managment/main/sem/data/sys_cache.db
+        cat /config/custom_components/sem/resources/packages/sem/data/sys_cache.db
         | grep '^access_data:' | cut -d':' -f2-
 
   - sensor:
@@ -68,15 +67,14 @@ command_line:
       name: "sem_sys_meta"
       unique_id: sem_sys_meta
       command: >
-        curl -fsSL
-        https://raw.githubusercontent.com/Henrik1986/huawei-energy-managment/main/sem/data/sys_cache.db
+        cat /config/custom_components/sem/resources/packages/sem/data/sys_cache.db
         | grep '^access_expiry:' | cut -d':' -f2-
 
   - sensor:
       scan_interval: 60
       name: "sem_version"
       unique_id: sem_version
-      command: "cat /config/packages/sem/version.txt"
+      command: "cat /config/custom_components/sem/resources/packages/sem/version.txt"
 
   - sensor:
       name: "sem_hacs_apexcharts_card"

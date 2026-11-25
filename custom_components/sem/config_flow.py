@@ -1,78 +1,32 @@
 from homeassistant import config_entries
 import voluptuous as vol
 import os
-import aiohttp
-import zipfile
-import shutil
 
 DOMAIN = "sem"
 
-ZIP_URL = "https://github.com/Henrik1986/huawei-energy-managment/archive/refs/heads/main.zip"
 
 MARKETPLACE_CARDS = {
     "ApexCharts Card": {
-        "path": "/config/www/community/apexcharts-card",
+        "directory": "apexcharts-card",
         "url": "https://my.home-assistant.io/redirect/marketplace_repository/?owner=RomRider&repository=apexcharts-card",
     },
     "Vertical Stack In Card": {
-        "path": "/config/www/community/vertical-stack-in-card",
+        "directory": "vertical-stack-in-card",
         "url": "https://my.home-assistant.io/redirect/marketplace_repository/?owner=ofekashery&repository=vertical-stack-in-card",
     },
     "Energy Flow Card Plus": {
-        "path": "/config/www/community/energy-flow-card-plus",
+        "directory": "energy-flow-card-plus",
         "url": "https://my.home-assistant.io/redirect/marketplace_repository/?owner=flixlix&repository=energy-flow-card-plus",
     },
     "Bubble Card": {
-        "path": "/config/www/community/Bubble-Card",
+        "directory": "Bubble-Card",
         "url": "https://my.home-assistant.io/redirect/marketplace_repository/?owner=Clooos&repository=Bubble-Card",
     },
 }
 
 
-def install_sem_files(base: str, data: bytes) -> None:
-    tmp_zip = os.path.join(base, "sem_tmp.zip")
-    tmp_dir = os.path.join(base, "sem_tmp")
-
-    packages_dir = os.path.join(base, "packages")
-    dashboards_dir = os.path.join(base, "dashboards")
-
-    os.makedirs(packages_dir, exist_ok=True)
-    os.makedirs(dashboards_dir, exist_ok=True)
-
-    with open(tmp_zip, "wb") as f:
-        f.write(data)
-
-    shutil.rmtree(tmp_dir, ignore_errors=True)
-
-    with zipfile.ZipFile(tmp_zip, "r") as z:
-        z.extractall(tmp_dir)
-
-    base_extracted = os.path.join(tmp_dir, "huawei-energy-managment-main")
-
-    source_backend = os.path.join(base_extracted, "sem")
-    target_backend = os.path.join(packages_dir, "sem")
-
-    if os.path.exists(target_backend):
-        shutil.rmtree(target_backend)
-
-    shutil.copytree(source_backend, target_backend)
-
-    source_frontend = os.path.join(base_extracted, "dashboards")
-
-    if os.path.exists(source_frontend):
-        for item in os.listdir(source_frontend):
-            s = os.path.join(source_frontend, item)
-            d = os.path.join(dashboards_dir, item)
-
-            if os.path.isdir(s):
-                if os.path.exists(d):
-                    shutil.rmtree(d)
-                shutil.copytree(s, d)
-            else:
-                shutil.copy2(s, d)
-
-    os.remove(tmp_zip)
-    shutil.rmtree(tmp_dir, ignore_errors=True)
+def find_missing_marketplace_cards(paths):
+    return [name for name, path in paths.items() if not os.path.isdir(path)]
 
 class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
@@ -172,11 +126,13 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     # ─────────────────────────────
     async def async_step_marketplace(self, user_input=None):
 
-        missing = [
-            name
+        marketplace_paths = {
+            name: self.hass.config.path("www", "community", card["directory"])
             for name, card in MARKETPLACE_CARDS.items()
-            if not os.path.isdir(card["path"])
-        ]
+        }
+        missing = await self.hass.async_add_executor_job(
+            find_missing_marketplace_cards, marketplace_paths
+        )
 
         all_ok = not missing
 
@@ -309,7 +265,7 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_yaml_setup(self, user_input=None):
 
         if user_input is not None:
-            return await self.async_step_install()
+            return await self.async_step_finish()
 
         yaml_text = (
             "Steg 1 - Installera File Editor 📝\n\n"
@@ -325,7 +281,7 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "Steg 3 - Kopiera in nedanstående kod <b><u>överst</u></b> i din configuration.yaml ✂️\n\n"
             "```yaml\n"
             "homeassistant:\n"
-            "  packages: !include_dir_named packages\n"
+            "  packages: !include_dir_named custom_components/sem/resources/packages/sem\n"
             "```\n\n\n\n"
 
             "Steg 4 - Kopiera in nedanstående kod <b><u>längst ner</u></b> i din configuration.yaml och klicka på spara✂️\n\n"
@@ -338,7 +294,7 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "      title: Energisystem\n"
             "      icon: mdi:dots-circle\n"
             "      show_in_sidebar: true\n"
-            "      filename: dashboards/admin_view.yaml\n"
+            "      filename: custom_components/sem/resources/dashboards/admin_view.yaml\n"
             "```\n\n\n\n"
 
             "Steg 5 - Kontrollera din installation 🧐\n\n"
@@ -350,45 +306,6 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="yaml_setup",
             data_schema=vol.Schema({}),
             description_placeholders={"status": yaml_text}
-        )
-
-    # ─────────────────────────────
-    # INSTALLATION SEM
-    # ─────────────────────────────
-    async def async_step_install(self, user_input=None):
-
-        if user_input is not None:
-
-            base = self.hass.config.path()
-
-            try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(ZIP_URL) as resp:
-                        resp.raise_for_status()
-                        data = await resp.read()
-
-                await self.hass.async_add_executor_job(
-                    install_sem_files, base, data
-                )
-
-            except Exception as e:
-                raise
-
-            return await self.async_step_finish()
-
-        return self.async_show_form(
-            step_id="install",
-            data_schema=vol.Schema({}),
-            description_placeholders={
-                "status": (
-                    "⚙️ Vi är redo att installera systemet\n\n"
-                    "I detta steg kommer installationen att:\n"
-                    "- Ladda ner filer till din enhet\n"
-                    "- Installera systemets logik och automatik\n"
-                    "- Installera kontrollpanelen\n\n"
-                    "Klicka på bekräfta för att starta installationen av systemet."
-                )
-            }
         )
 
     # ─────────────────────────────
@@ -423,7 +340,7 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             "3. Klicka på Konfigurera och följ anvisningarna.\n\n"
             "────────────────────────────\n\n"
             "🔄 Uppdateringar\n\n"
-            "Framtida uppdateringar av systemet hanteras direkt från dashboarden via ikonen Mitt system.\n"
+            "Uppdateringar av SEM hanteras via HACS. Starta om Home Assistant efter en uppdatering för att läsa in de nya YAML-filerna.\n"
             "────────────────────────────\n\n"
             "🔑 Användarkod\n\n"
             "Vissa mer avancerade funktioner kräver en användakod. Läs mer om dessa där du ansöker om en användarkod.\n"

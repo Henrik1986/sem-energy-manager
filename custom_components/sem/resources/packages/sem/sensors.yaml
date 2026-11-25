@@ -162,32 +162,3 @@ sensor:
     method: left
 
 ####################################################################
-
-  # LATEST GITHUB RELEASE
-  - platform: rest
-    name: "sem_github_latest_release"
-    resource: https://raw.githubusercontent.com/Henrik1986/huawei-energy-managment/main/sem/github_version.json
-    value_template: "{{ value_json.version }}"
-    scan_interval: 21600 # var 6:e timme
-
-
-
-
-# ANVÄNDS EJ 
-  - platform: rest
-    name: sem_code_test
-    unique_id: sem_code_test
-    resource: https://raw.githubusercontent.com/Henrik1986/huawei-energy-managment/main/sem/data/sys_cache.db
-    value_template: >
-      {{ value | regex_findall_index('access_data:\\s*(.+)', 0) }}    
-    scan_interval: 60
-        
-
-          
-          
-          
-          
-          
-          
-          
-          
