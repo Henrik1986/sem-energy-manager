@@ -1,0 +1,193 @@
+sensor:
+  # HOUSE KWH
+  - platform: integration
+    name: "sem_house_power_tot"
+    source: sensor.sem_house_power
+    round: 2
+    method: left
+
+  # COST WITHOUT SYSTEM SEK
+  - platform: integration
+    name: "sem_cost_without_system_total"
+    source: sensor.sem_cost_without_system
+    method: left
+    round: 2
+
+  # COST EV CHARGING SEK
+  - platform: integration
+    name: "sem_ev_charging_cost_total" 
+    source: sensor.sem_ev_charging_cost
+    method: left
+    round: 2
+
+  # SOLAR KWH
+  - platform: integration
+    name: "sem_input_power_with_efficiency_loss_kW_tot"
+    source: sensor.sem_input_power_with_efficiency_loss_kW
+    round: 2
+    method: trapezoidal
+
+  # EV KWH
+  - platform: integration
+    name: "sem_ev_sensor_power_tot"
+    source: sensor.sem_ev_sensor_power
+    round: 2
+    method: left
+
+  # IMPORT KWH
+  - platform: integration
+    name: "sem_import_power_tot"
+    source: sensor.sem_import_power
+    round: 2
+    method: left
+
+  # EXPORT KWH
+  - platform: integration
+    name: "sem_export_power_tot"
+    source: sensor.sem_export_power
+    round: 2
+    method: left
+
+  # BATTERY DISCHARGE KWH
+  - platform: integration
+    source: sensor.sem_battery_discharge_power
+    name: sem_battery_discharge_energy
+    round: 3
+    method: left
+
+  # BATTERY CHARGE KWH
+  - platform: integration
+    source: sensor.sem_battery_charge_power
+    name: sem_battery_charge_energy
+    round: 3
+    method: left
+
+  # BATTERY CHARGE FROM GRID KWH
+  - platform: integration
+    source: sensor.sem_battery_charge_from_grid_power
+    name: sem_battery_charge_from_grid_energy
+    round: 3
+    method: left
+
+  # BATTERY CHARGE FROM SOLAR KWH
+  - platform: integration
+    source: sensor.sem_battery_charge_from_solar_power
+    name: sem_battery_charge_from_solar_energy
+    round: 3
+    method: left
+
+  # SOLAR ENERGI TO HOUSE KWH
+  - platform: integration
+    source: sensor.sem_solar_to_house_power
+    name: sem_solar_to_house_energy
+    round: 3
+    method: left
+
+  # TOTAL SAVINGS SEK
+  - platform: integration
+    name: sem_savings_total
+    unique_id: sem_savings_total
+    source: sensor.sem_savings_power_total
+    round: 2
+    method: trapezoidal
+
+  # TOTAL EARNINGS SEK
+  - platform: integration
+    name: sem_solar_export_earnings_total
+    unique_id: sem_solar_export_earnings_total
+    source: sensor.sem_solar_export_earnings
+    round: 2
+    method: trapezoidal
+
+  # TOTAL GRID IMPORT COST SEK
+  - platform: integration
+    name: sem_grid_import_cost_total
+    unique_id: sem_grid_import_cost_total
+    source: sensor.sem_grid_import_cost
+    round: 2
+    method: trapezoidal
+
+  # TOTAL BATTERY CHARGED KWH
+  - platform: integration
+    source: sensor.sem_battery_charge_power
+    name: SEM Battery Charged Energy
+    unique_id: sem_battery_charged_energy
+    round: 3
+    method: left
+
+  # TOTAL BATTERY DISCHARGED KWH
+  - platform: integration
+    source: sensor.sem_battery_discharge_power
+    name: SEM Battery Discharged Energy
+    unique_id: sem_battery_discharged_energy
+    round: 3
+    method: left
+
+##########################GRAFER###################################
+  - platform: integration
+    source: sensor.sem_battery_charge_power_graph
+    name: sem_battery_charge_energy_graph
+    unique_id: sem_battery_charge_energy_graph
+    round: 3
+    method: left
+
+  - platform: integration
+    source: sensor.sem_battery_discharge_power_graph
+    name: sem_battery_discharge_energy_graph
+    unique_id: sem_battery_discharge_energy_graph
+    round: 3
+    method: left
+
+  - platform: integration
+    source: sensor.sem_solar_export_power
+    name: sem_solar_exported_energy
+    unique_id: sem_solar_exported_energy
+    round: 3
+    method: left
+
+#EXPORT KWH NEGATIVE VALUE
+  - platform: integration
+    source: sensor.sem_export_power_graph
+    name: sem_export_power_graph_energy
+    unique_id: sem_export_power_graph_energy
+    round: 3
+    method: left
+
+#BATTERY TO HOUSE KWH
+  - platform: integration
+    source: sensor.sem_battery_to_house_power
+    name: sem_battery_to_house_energy
+    unique_id: sem_battery_to_house_energy
+    round: 3
+    method: left
+
+####################################################################
+
+  # LATEST GITHUB RELEASE
+  - platform: rest
+    name: "sem_github_latest_release"
+    resource: https://raw.githubusercontent.com/Henrik1986/huawei-energy-managment/main/sem/github_version.json
+    value_template: "{{ value_json.version }}"
+    scan_interval: 21600 # var 6:e timme
+
+
+
+
+# ANVÄNDS EJ 
+  - platform: rest
+    name: sem_code_test
+    unique_id: sem_code_test
+    resource: https://raw.githubusercontent.com/Henrik1986/huawei-energy-managment/main/sem/data/sys_cache.db
+    value_template: >
+      {{ value | regex_findall_index('access_data:\\s*(.+)', 0) }}    
+    scan_interval: 60
+        
+
+          
+          
+          
+          
+          
+          
+          
+          

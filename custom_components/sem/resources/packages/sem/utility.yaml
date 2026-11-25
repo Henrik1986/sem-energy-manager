@@ -1,0 +1,339 @@
+utility_meter:
+  
+# SOLARPRODUCTION KWH DAILY
+  sem_solar_production:
+    source: sensor.sem_input_power_with_efficiency_loss_kW_tot
+    cycle: daily
+    unique_id: sem_solar_production
+
+# SOLAR SELF_USED
+  sem_solar_selfused:
+    source: sensor.sem_consumed_solar_energy_today
+    cycle: daily
+    unique_id: sem_solar_self_used
+
+# EV KWH DAILY
+  sem_ev_charge:
+    source: sensor.sem_ev_sensor_power_tot
+    cycle: daily
+    unique_id: sem_ev_charge
+
+# IMPORT KWH DAILY
+  sem_import:
+    source: sensor.sem_import_power_tot
+    cycle: daily
+    unique_id: sem_import
+
+# EXPORT KWH DAILY
+  sem_export:
+    source: sensor.sem_export_power_tot
+    cycle: daily
+    unique_id: sem_export
+
+############# COST WITHOUT SYSTEM  ##################
+
+# COST SEK WITHOUT SYSTEM DAILY
+  sem_cost_without_system_meter_daily:
+    source: sensor.sem_cost_without_system_total
+    cycle: daily
+    periodically_resetting: false
+    unique_id: sem_cost_without_system_meter_daily
+
+# COST SEK WITHOUT SYSTEM WEEKLY
+  sem_cost_without_system_meter_weekly:
+    source: sensor.sem_cost_without_system_total
+    cycle: weekly
+    periodically_resetting: false
+    unique_id: sem_cost_without_system_meter_weekly
+
+# COST SEK WITHOUT SYSTEM MONTHLY
+  sem_cost_without_system_meter_monthly:
+    source: sensor.sem_cost_without_system_total
+    cycle: monthly
+    periodically_resetting: false
+    unique_id: sem_cost_without_system_meter_monthly
+
+# COST SEK WITHOUT SYSTEM YEARLY
+  sem_cost_without_system_meter_yearly:
+    source: sensor.sem_cost_without_system_total
+    cycle: yearly
+    periodically_resetting: false
+    unique_id: sem_cost_without_system_meter_yearly
+
+# COST SEK WITHOUT SYSTEM TOTAL
+  sem_cost_without_system_meter_total:
+    source: sensor.sem_cost_without_system_total
+    periodically_resetting: false
+    unique_id: sem_cost_without_system_meter_total
+
+############# COST DIFFERENCE BETWEEN SYSTEM AND NO SYSTEM ##################
+
+# COST SEK DIFFERENCE DAILY
+  sem_extra_cost_meter_daily:
+    source: sensor.sem_extra_cost_accumulated
+    cycle: daily
+    net_consumption: true
+    periodically_resetting: false
+    unique_id: sem_extra_cost_meter_daily
+
+# COST SEK DIFFERENCE WEEKLY
+  sem_extra_cost_meter_weekly:
+    source: sensor.sem_extra_cost_accumulated
+    cycle: weekly
+    net_consumption: true
+    periodically_resetting: false
+    unique_id: sem_extra_cost_meter_weekly
+
+# COST SEK DIFFERENCE MONTHLY
+  sem_extra_cost_meter_monthly:
+    source: sensor.sem_extra_cost_accumulated
+    cycle: monthly
+    net_consumption: true
+    periodically_resetting: false
+    unique_id: sem_extra_cost_meter_monthly
+
+# COST SEK DIFFERENCE YEARLY
+  sem_extra_cost_meter_yearly:
+    source: sensor.sem_extra_cost_accumulated
+    cycle: yearly
+    net_consumption: true
+    periodically_resetting: false
+    unique_id: sem_extra_cost_meter_yearly
+
+# COST SEK DIFFERENCE TOTAL
+  sem_extra_cost_meter_total:
+    source: sensor.sem_extra_cost_accumulated
+    net_consumption: true
+    periodically_resetting: false
+    unique_id: sem_extra_cost_meter_total
+
+######################### NET COST (COST - EARNINGS) ##################
+
+# NET SEK COST DAILY
+  sem_grid_net_cost_meter_daily:
+    source: sensor.sem_grid_net_cost_accumulated
+    cycle: daily
+    net_consumption: true
+    periodically_resetting: false
+    unique_id: sem_grid_net_cost_meter_daily
+
+# NET SEK COST WEEKLY
+  sem_grid_net_cost_meter_weekly:
+    source: sensor.sem_grid_net_cost_accumulated
+    cycle: weekly
+    net_consumption: true
+    periodically_resetting: false
+    unique_id: sem_grid_net_cost_meter_weekly
+
+# NET SEK COST MONTHLY
+  sem_grid_net_cost_meter_monthly:
+    source: sensor.sem_grid_net_cost_accumulated
+    cycle: monthly
+    net_consumption: true
+    periodically_resetting: false
+    unique_id: sem_grid_net_cost_meter_monthly
+
+# NET SEK COST YEARLY
+  sem_grid_net_cost_meter_yearly:
+    source: sensor.sem_grid_net_cost_accumulated
+    cycle: yearly
+    net_consumption: true
+    periodically_resetting: false
+    unique_id: sem_grid_net_cost_meter_yearly
+
+# NET SEK COST TOTAL
+  sem_grid_net_cost_meter_total:
+    source: sensor.sem_grid_net_cost_accumulated
+    net_consumption: true
+    periodically_resetting: false
+    unique_id: sem_grid_net_cost_meter_total
+
+######################## EV CHARGE COST ##################
+# EV CHARGE COST SEK DAILY
+  sem_ev_cost_meter_daily:
+    source: sensor.sem_ev_charging_cost_total
+    cycle: daily
+    periodically_resetting: false
+    unique_id: sem_ev_cost_meter_daily
+
+# EV CHARGE COST SEK WEEKLY
+  sem_ev_cost_meter_weekly:
+    source: sensor.sem_ev_charging_cost_total
+    cycle: weekly
+    periodically_resetting: false
+    unique_id: sem_ev_cost_meter_weekly
+
+# EV CHARGE COST SEK MONTHLY
+  sem_ev_cost_meter_monthly:
+    source: sensor.sem_ev_charging_cost_total
+    cycle: monthly
+    periodically_resetting: false
+    unique_id: sem_ev_cost_meter_monthly
+
+# EV CHARGE COST SEK YEARLY
+  sem_ev_cost_meter_yearly:
+    source: sensor.sem_ev_charging_cost_total
+    cycle: yearly
+    periodically_resetting: false
+    unique_id: sem_ev_cost_meter_yearly
+
+# EV CHARGE COST SEK TOTAL
+  sem_ev_cost_meter_total:
+    source: sensor.sem_ev_charging_cost_total
+    cycle: yearly
+    periodically_resetting: false
+    unique_id: sem_ev_cost_meter_total
+
+########################## COST ##########################
+  # TOTAL GRID IMPORT COST SEK DAILY
+  sem_grid_import_cost_daily:
+    source: sensor.sem_grid_import_cost_total
+    cycle: daily
+    unique_id: sem_grid_import_cost_daily
+
+  # TOTAL GRID IMPORT COST SEK WEEKLY
+  sem_grid_import_cost_weekly:
+    source: sensor.sem_grid_import_cost_total
+    cycle: weekly
+    unique_id: sem_grid_import_cost_weekly
+
+  # TOTAL GRID IMPORT COST SEK MONTHLY
+  sem_grid_import_cost_monthly:
+    source: sensor.sem_grid_import_cost_total
+    cycle: monthly
+    unique_id: sem_grid_import_cost_monthly
+
+  # TOTAL GRID IMPORT COST SEK YEARLY
+  sem_grid_import_cost_yearly:
+    source: sensor.sem_grid_import_cost_total
+    cycle: yearly
+    unique_id: sem_grid_import_cost_yearly
+
+  # TOTAL GRID IMPORT COST SEK TOTAL
+  sem_grid_import_cost_tot:
+    source: sensor.sem_grid_import_cost_total
+    unique_id: sem_grid_import_cost_tot
+
+
+########################## SAVINGS ##########################
+
+# TOTAL SAVINGS SEK DAILY
+  sem_savings_daily:
+    source: sensor.sem_savings_total
+    cycle: daily
+    unique_id: sem_savings_daily
+
+# TOTAL SAVINGS SEK WEEKLY
+  sem_savings_weekly:
+    source: sensor.sem_savings_total
+    cycle: weekly
+    unique_id: sem_savings_weekly
+
+# TOTAL SAVINGS MONTHLY
+  sem_savings_monthly:
+    source: sensor.sem_savings_total
+    cycle: monthly
+    unique_id: sem_savings_monthly
+
+# TOTAL SAVINGS YEARLY
+  sem_savings_yearly:
+    source: sensor.sem_savings_total
+    cycle: yearly
+    unique_id: sem_savings_yearly
+
+# TOTAL SAVINGS TOTAL
+  sem_savings_tot:
+    source: sensor.sem_savings_total
+    unique_id: sem_savings_tot
+
+
+########################## EARNINGS ##########################
+# TOTAL EARNINGS SEK DAILY
+  sem_earnings_daily:
+    source: sensor.sem_solar_export_earnings_total
+    cycle: daily
+    unique_id: sem_earnings_daily
+
+# TOTAL EARNINGS SEK WEEKLY
+  sem_earnings_weekly:
+    source: sensor.sem_solar_export_earnings_total
+    cycle: weekly
+    unique_id: sem_earnings_weekly
+
+# TOTAL EARNINGS SEK MONTHLY
+  sem_earnings_monthly:
+    source: sensor.sem_solar_export_earnings_total
+    cycle: monthly
+    unique_id: sem_earnings_monthly
+
+# TOTAL EARNINGS SEK YEARLY
+  sem_earnings_yearly:
+    source: sensor.sem_solar_export_earnings_total
+    cycle: yearly
+    unique_id: sem_earnings_yearly
+
+# TOTAL EARNINGS SEK TOTAL
+  sem_earnings_tot:
+    source: sensor.sem_solar_export_earnings_total
+    unique_id: sem_earnings_tot
+
+
+##### BATTERY #####
+# BATTERY DISCHARGE KWH
+  sem_battery_discharge_quarter:
+    source: sensor.sem_battery_discharge_energy
+    cycle: quarter-hourly
+    unique_id: sem_battery_discharge_energy
+
+# BATTERY CHARGE FROM GRID KWH
+  sem_battery_charge_grid_quarter:
+    source: sensor.sem_battery_charge_from_grid_energy
+    cycle: quarter-hourly
+    unique_id: sem_battery_charge_from_grid_energy
+
+  # BATTERY CHARGE FROM SOLAR KWH
+  sem_battery_charge_solar_quarter:
+    source: sensor.sem_battery_charge_from_solar_energy
+    cycle: quarter-hourly
+    unique_id: sem_battery_charge_from_solar_energy
+
+  # SOLAR ENERGI TO HOUSE KWH
+  sem_solar_to_house_energy_quarter:
+    source: sensor.sem_solar_to_house_energy
+    cycle: quarter-hourly
+    unique_id: sem_solar_to_house_energy_quarter
+    
+  # BATTERY DISCHARGE KWH DAILY  
+  sem_battery_discharge_energy_daily:
+    source: sensor.sem_battery_discharge_energy
+    cycle: daily
+    unique_id: sem_battery_discharge_energy_daily
+
+  # BATTERY CHARGE KWH DAILY
+  sem_battery_charge_energy_daily:
+    source: sensor.sem_battery_charge_energy
+    cycle: daily
+    unique_id: sem_battery_charge_energy_daily
+
+#############GRAFER#############
+
+  sem_battery_charge_energy_graph_daily:
+    source: sensor.sem_battery_charge_energy_graph
+    cycle: daily
+    unique_id: sem_battery_charge_energy_graph_daily
+
+  sem_battery_discharge_energy_graph_graph_daily:
+    source: sensor.sem_battery_discharge_energy_graph
+    cycle: daily
+    unique_id: sem_battery_discharge_energy_graph_graph_daily
+
+  sem_solar_exported_energy_daily:
+    source: sensor.sem_solar_exported_energy
+    cycle: daily
+    unique_id: sem_solar_exported_energy_daily
+
+  sem_battery_to_house_energy_daily:
+    source: sensor.sem_battery_to_house_energy
+    cycle: daily
+    unique_id: sem_battery_to_house_energy_daily
+    

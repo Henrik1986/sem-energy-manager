@@ -1,0 +1,47 @@
+input_button:
+  sem_update_battery_cheapest_charge:
+    name: "Update Battery Cheapest Charge"
+  
+  sem_buy_key: 
+    name: "Buy key"
+
+  sem_settings: 
+    name: "Settings"
+
+  sem_settings_fast: 
+    name: "Fast Settings"
+
+  sem_config_1: 
+    name: "Start Config"
+
+  sem_config_2:
+    name: "Step Two Config"
+  
+  sem_restart_ha:
+    name: Restart Home Assistant
+    
+  sem_test: 
+    name: TEST
+
+  sem_search_charge_interval:
+    name: Search Charge Interval
+
+  sem_ev_easee_configure: 
+    name: Configure Easee Wallbox
+
+  sem_ev_zaptec_configure:
+    name: Configure Zaptec Wallbox
+
+  sem_ev_charge_now: 
+    name: Start EV Charge Now
+
+  sem_ev_charge_stop_1:
+    name: Stoppa laddbox 1
+    icon: mdi:ev-station-off
+
+  sem_ev_charge_stop_2:
+    name: Stoppa laddbox 2
+    icon: mdi:ev-station-off
+
+  sem_update_installation_values: 
+    name: Update Installation Values

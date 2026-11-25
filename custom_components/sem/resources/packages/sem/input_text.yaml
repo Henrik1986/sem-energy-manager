@@ -1,0 +1,182 @@
+input_text:
+# STATE WALLBOX 1
+  sem_ev_sensor_state:
+    name: "Laddbox 1 state"
+
+# STATE WALLBOX 2
+  sem_ev_sensor_state_2:
+    name: "Laddbox 2 state"
+
+# CHARGING STATE WALLBOX 1
+  sem_ev_charging_state: 
+    name: "Laddbox 1 charging state"
+
+# CHARGING STATE WALLBOX 2
+  sem_ev_charging_state_2: 
+    name: "Laddbox 2 charging state"
+
+# EFFEKT WALLBOX 1
+  sem_ev_sensor:
+    name: "Laddbox 1 effekt"
+    icon: mdi:car-electric
+
+# EFFEKT WALLBOX 2
+  sem_ev_sensor_2:
+    name: "Laddbox 2 effekt"
+    icon: mdi:car-electric
+    
+  sem_nordpool_config_entry_official:
+    name: "SEM Nordpool Config Entry (Official)"
+    icon: mdi:account-key
+    max: 100
+
+  sem_nordpool_area_official:
+    name: "SEM Nordpool Area (Official)"
+    icon: mdi:map-marker
+    max: 10
+
+  sem_nordpool_sensor_inofficial:
+    name: "Nordpool sensor inofficial"
+    max: 100
+
+  sem_nordpool_entry_inofficial:
+    name: "Nordpool entry inofficial"
+    max: 100
+
+  sem_weather_sensor:
+    name: "Vädersensor (SMHI)"
+    icon: mdi:weather-partly-cloudy
+    mode: text
+    max: 50
+
+  sem_device_id:
+    name: Huawei Battery Device ID
+    icon: mdi:identifier
+    max: 50
+  
+  sem_device_id_inverter:
+    name: Huawei Inverter Device ID
+    icon: mdi:identifier
+    max: 50
+  
+  sem_user_access_code: 
+    name: AnvändarID
+    icon: mdi:identifier
+    max: 100
+  
+  sem_name:
+    name: Name
+
+  sem_epost: 
+    name: E-post
+
+  car_battery_sensor:
+    name: Batterisensor elbil
+  
+  sem_ai_agent: 
+    name: AI Agent
+
+  sem_ev_charger_1_status_sensor:
+    name: Laddbox 1 - statussensor
+    icon: mdi:ev-station
+    max: 255
+
+  sem_ev_charger_1_connected_status:
+    name: Laddbox 1 - status när kabeln är ansluten
+    icon: mdi:power-plug
+    max: 100
+
+  sem_ev_charger_1_connected_state:
+    name: Laddbox 1 - ansluten men ej laddning
+    icon: mdi:power-plug-outline
+    max: 100
+
+  sem_ev_charger_1_finished_state:
+    name: Laddbox 1 - slutförd laddning
+    icon: mdi:battery-charging-100
+    max: 100
+
+  sem_ev_charger_2_status_sensor:
+    name: Laddbox 2 - statussensor
+    icon: mdi:ev-station
+    max: 255
+
+  sem_ev_charger_2_connected_status:
+    name: Laddbox 2 - status när kabeln är ansluten
+    icon: mdi:power-plug
+    max: 100
+
+  sem_ev_charger_2_connected_state:
+    name: Laddbox 2 - ansluten men ej laddning
+    icon: mdi:power-plug-outline
+    max: 100
+
+  sem_ev_charger_2_finished_state:
+    name: Laddbox 2 - slutförd laddning
+    icon: mdi:battery-charging-100
+    max: 100
+
+  sem_ev_easee_id:
+    name: Easee laddbox ID 1
+    icon: mdi:identifier
+    max: 255
+
+  sem_ev_easee_id_2:
+    name: Easee laddbox ID 2
+    icon: mdi:identifier
+    max: 255
+
+  sem_ev_easee_confirmation:
+    name: Easee konfiguration
+    max: 255
+
+########################################################
+
+
+  sem_ev_charger_1_start:
+    name: Laddbox 1 - Start
+    max: 255
+
+  sem_ev_charger_1_stop:
+    name: Laddbox 1 - Stopp
+    max: 255
+
+  sem_ev_charger_2_start:
+    name: Laddbox 2 - Start
+    max: 255
+
+  sem_ev_charger_2_stop:
+    name: Laddbox 2 - Stopp
+    max: 255
+
+##################ZAPTEC####################
+  sem_ev_zaptec_current_entity:
+    name: Zaptec 1 - Entitet för laddström
+    icon: mdi:current-ac
+    max: 255
+
+  sem_ev_zaptec_current_entity_2:
+    name: Zaptec 2 - Entitet för laddström
+    icon: mdi:current-ac
+    max: 255
+
+  sem_ev_zaptec_stop_entity:
+    name: Zaptec 1 - Entitet för stopp
+    icon: mdi:stop-circle
+    max: 255
+
+  sem_ev_zaptec_stop_entity_2:
+    name: Zaptec 2 - Entitet för stopp
+    icon: mdi:stop-circle
+    max: 255
+
+  sem_ev_zaptec_confirmation:
+    name: Zaptec konfigurationsstatus
+    max: 255
+
+###############################################
+
+  sem_installation_status:
+    name: Installationsstatus
+    max: 100
+    icon: mdi:cog-sync

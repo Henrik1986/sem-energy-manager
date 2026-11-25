@@ -1,0 +1,466 @@
+input_number:
+
+  sem_charge_profit_threshold:
+    name: Laddningsvinst - gränsvärde
+    min: 0
+    max: 10
+    step: 0.01
+    unit_of_measurement: "SEK/kWh"
+    mode: box
+
+# KAN VI TA BORT - ANVÄNDS INTE I NÅGON LOGIK
+  sem_max_export_power: 
+    name: Max effekt att sälja (kW)
+    min: 0
+    max: 10
+    step: 0.1
+    unit_of_measurement: kW
+    mode: box
+
+# ANVÄNDS I ALLA LOGIK, MEN VI BEHÖVER BYTA NAMN
+  sem_battery_discharge_power_ev_limit:
+    name: "Max laddningseffekt"
+    min: 0
+    max: 20
+    step: 0.1
+    mode: box
+    unit_of_measurement: "kW"
+
+# PRICE LIMIT THAT MUST BE TRUE BEFORE EXPORT 
+  sem_battery_charge_price:
+    name: "Battery Charge Price Limit"
+    icon: mdi:currency-sek
+    min: 0
+    max: 10
+    step: 0.1
+    unit_of_measurement: "SEK/kWh"
+    mode: box
+
+# PRICE LIMIT FOR EXPORT 
+  sem_expensive_electricity:
+    name: "Expensive Electricity Threshold"
+    icon: mdi:currency-sek
+    min: 0.0
+    max: 10.0
+    step: 0.1
+    unit_of_measurement: "SEK/kWh"
+    mode: box
+
+# SETS PRICE THAT IS OK TO IMPORT FROM GRID AND DIACTIVATE BATTERY
+  sem_low_price_threshold: 
+    name: "Low Price Threshold"
+    icon: mdi:currency-sek
+    min: 0.0
+    max: 10.0
+    step: 0.1
+    unit_of_measurement: "SEK/kWh"
+    mode: box
+
+# DoD AFTER DIACTIVATION OF BATTERY
+  sem_batteries_end_of_discharge_soc:
+    name: "batteries_end_of_discharge_soc"
+    min: 0
+    max: 50
+    step: 1
+    unit_of_measurement: "%"
+    icon: "mdi:battery-alert"
+    mode: box
+  
+  sem_battery_total_capacity_kwh:
+    name: "Battery - Total Capacity"
+    min: 0
+    max: 100
+    step: 0.1
+    mode: box
+    unit_of_measurement: "kWh"
+
+  sem_max_charge_power_window_1:
+    name: Max laddningseffekt fönster 1
+    min: 0
+    max: 10
+    step: 0.1
+    mode: box
+    unit_of_measurement: "kW"
+
+  sem_max_charge_power_window_2:
+    name: Max laddningseffekt fönster 2
+    min: 0
+    max: 10
+    step: 0.1
+    mode: box
+    unit_of_measurement: "kW"
+
+  sem_max_charge_manual_charging:
+    name: Max laddningseffekt manuell laddning
+    min: 0
+    max: 10
+    step: 0.1
+    mode: box
+    unit_of_measurement: "kW"
+
+#### SOLAR 1 #####
+  sem_solar_lat:
+    name: "Solar Latitude"
+    min: -90
+    max: 90
+    step: 0.0001
+    mode: box
+    unit_of_measurement: °
+    
+  sem_solar_lon:
+    name: "Solar Longitude"
+    min: -180
+    max: 180
+    step: 0.0001
+    mode: box
+    unit_of_measurement: °
+    
+  sem_solar_dec:
+    name: "Solar Panel Tilt Angle"
+    min: 0
+    max: 90
+    step: 1
+    mode: box
+    unit_of_measurement: °
+
+  sem_solar_az:
+    name: "Solar Panel Azimuth"
+    min: -180
+    max: 180
+    step: 1
+    mode: box
+    unit_of_measurement: °
+    
+  sem_solar_kwp:
+    name: "Installed Panel Capacity (kWp)"
+    min: 0
+    max: 100
+    step: 0.01
+    mode: box
+    unit_of_measurement: "kWp"
+
+  sem_solar_damping_morning:
+    name: "Dämpningsfaktor morgon"
+    min: 0
+    max: 2
+    step: 0.01
+    mode: box
+
+  sem_solar_damping_evening:
+    name: "Dämpningsfaktor kväll"
+    min: 0
+    max: 2
+    step: 0.01
+    mode: box
+
+#### SOLAR 2 #####    
+  sem_solar_dec_2:
+    name: "Solar Panel Tilt Angle 2"
+    min: 0
+    max: 90
+    step: 1
+    mode: box
+    unit_of_measurement: °
+
+  sem_solar_az_2:
+    name: "Solar Panel Azimuth 2"
+    min: -180
+    max: 180
+    step: 1
+    mode: box
+    unit_of_measurement: °
+    
+  sem_solar_kwp_2:
+    name: "Installed Panel Capacity (kWp) 2"
+    min: 0
+    max: 100
+    step: 0.01
+    mode: box
+    unit_of_measurement: "kWp"
+
+  sem_solar_damping_morning_2:
+    name: "Dämpningsfaktor morgon 2"
+    min: 0
+    max: 2
+    step: 0.01
+    mode: box
+
+  sem_solar_damping_evening_2:
+    name: "Dämpningsfaktor kväll 2"
+    min: 0
+    max: 2
+    step: 0.01
+    mode: box
+  
+  sem_extra_1:
+    name: "Extra laddningstillägg 1"
+    min: -100
+    max: 100
+    step: 0.5
+    mode: box
+    unit_of_measurement: "kWh"
+
+  sem_extra_2:
+    name: "Extra laddningstillägg 2"
+    min: -100
+    max: 100
+    step: 0.5
+    mode: box
+    unit_of_measurement: "kWh"
+
+  sem_battery_extra_export_1:
+    name: "Extra exporttillägg 1"
+    min: -100
+    max: 100
+    step: 0.5
+    mode: box
+    unit_of_measurement: "kWh"
+
+  sem_battery_extra_export_2:
+    name: "Extra exporttillägg 2"
+    min: -100
+    max: 100
+    step: 0.5
+    mode: box
+    unit_of_measurement: "kWh"
+
+  sem_manual_charge_duration:
+    name: Laddtid
+    min: 5
+    max: 180
+    step: 5
+    unit_of_measurement: "min"
+    mode: box
+
+  sem_battery_grid_normal_power:
+    name: Effekt från elnätet
+    min: 0
+    max: 10
+    step: 0.1
+    unit_of_measurement: "kW"
+    mode: box
+
+  sem_ev_charge_goal:
+    name: Laddningsmål
+    min: 0
+    max: 100
+    step: 1
+    unit_of_measurement: "%"
+    mode: box
+
+  sem_battery_solar_kwh:
+    name: Solar battery
+    max: 100
+    min: -10
+    unit_of_measurement: kWh
+    mode: box
+
+  sem_battery_grid_kwh:
+    name: Grind battery
+    max: 100
+    min: 0
+    unit_of_measurement: kWh
+    mode: box
+
+  sem_battery_price_window_1:
+    name: Battery price window 1
+    min: 0
+    max: 20
+    step: 0.001
+    unit_of_measurement: "SEK/kWh"
+    mode: box
+
+  sem_battery_price_window_2:
+    name: Battery price window 2
+    min: 0
+    max: 20
+    step: 0.001
+    unit_of_measurement: "SEK/kWh"
+    mode: box
+  
+  grid_charge_start_1a: 
+    name: Grid charge start 1a
+    min: 0
+    max: 100000000000000000000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  grid_charge_stop_1a: 
+    name: Grid charge stop 1a
+    min: 0
+    max: 100000000000000000000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  grid_charge_start_2: 
+    name: Grid charge start 2
+    min: 0
+    max: 100000000000000000000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+  
+  grid_charge_stop_2:
+    name: Grid charge stop 2
+    min: 0
+    max: 100000000000000000000000
+    step: 0.001
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sem_grid_fees:
+    name: Grid fees
+    min: 0
+    max: 10
+    step: 0.01
+    unit_of_measurement: "SEK/kWh"
+    mode: box
+
+  sem_export_addon:
+    name: Export tillägg
+    min: 0
+    max: 10
+    step: 0.01
+    unit_of_measurement: "SEK/kWh"
+    mode: box
+
+  sem_battery_wear_cost:
+    name: Batterislitage vid export
+    min: 0
+    max: 5
+    step: 0.01
+    unit_of_measurement: "SEK/kWh"
+    mode: box
+
+  sem_export_profit_margin:
+    name: Vinstmarginal vid export
+    min: 0
+    max: 5
+    step: 0.01
+    unit_of_measurement: "SEK/kWh"
+    mode: box
+  
+  sem_battery_export_reserve: 
+    name: Exportbuffert
+    min: 0
+    max: 50
+    step: 0.1
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sem_ev_charge_hours:
+    name: SEM EV Charge Hours
+    min: 1
+    max: 12
+    step: 0.25
+    mode: box
+    unit_of_measurement: h
+
+  sem_battery_solar_calibration:
+    name: SEM Battery Solar Calibration
+    min: 0
+    max: 200
+    step: 0.01
+    mode: box
+    unit_of_measurement: "kWh"
+
+  sem_battery_grid_calibration:
+    name: SEM Battery Grid Calibration
+    min: 0
+    max: 200
+    step: 0.01
+    mode: box
+    unit_of_measurement: "kWh"
+
+  sem_battery_calibration_actual:
+    name: SEM Battery Calibration Actual
+    min: 0
+    max: 200
+    step: 0.01
+    mode: box
+    unit_of_measurement: "kWh"
+
+  sem_battery_calibration_difference:
+    name: SEM Battery Calibration Difference
+    min: -200
+    max: 200
+    step: 0.01
+    mode: box
+    unit_of_measurement: "kWh"
+    
+  sem_battery_extra_charge_max:
+    name: SEM Battery Max Extra Charge
+    min: -200
+    max: 200
+    step: 0.01
+    mode: box
+    unit_of_measurement: "kWh"
+
+  sem_ev_easee_max_current:
+    name: Easee max tillåten ström
+    icon: mdi:current-ac
+    min: 6
+    max: 32
+    step: 1
+    unit_of_measurement: A
+    mode: box
+
+#############ZAPTEC####################
+  sem_ev_zaptec_max_current:
+    name: Zaptec 1 - Max laddström
+    icon: mdi:current-ac
+    min: 6
+    max: 32
+    step: 1
+    unit_of_measurement: A
+    mode: box
+
+  sem_ev_zaptec_max_current_2:
+    name: Zaptec 2 - Max laddström
+    icon: mdi:current-ac
+    min: 6
+    max: 32
+    step: 1
+    unit_of_measurement: A
+    mode: box
+#########################################
+
+  sem_cheap_charge_price_limit:
+    name: Gräns för billig extraladdning
+    min: 0
+    max: 1
+    step: 0.01
+    unit_of_measurement: "SEK/kWh"
+    mode: box
+
+  sem_cheap_charge_max_kwh:
+    name: Maximal extra laddning vid billigt pris
+    min: 0
+    max: 20
+    step: 0.1
+    unit_of_measurement: "kWh"
+    mode: box
+
+  sem_full_charge_price_limit:
+    name: Gräns för full extraladdning
+    min: 0
+    max: 1
+    step: 0.01
+    unit_of_measurement: "SEK/kWh"
+    mode: box
+
+  sem_charge_strategy:
+    name: Laddningsstrategi
+    min: 1
+    max: 10
+    step: 1
+    icon: mdi:battery-charging
+
+  sem_export_strategy:
+    name: Exportstrategi
+    min: 1
+    max: 10
+    step: 1
+    icon: mdi:transmission-tower-export

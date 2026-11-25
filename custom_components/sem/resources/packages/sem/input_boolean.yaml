@@ -1,0 +1,163 @@
+input_boolean:
+
+  sem_ev_charging_protection_enabled:
+    name: "EV Protection"
+
+  sem_battery_save:
+    name: Sparar laddning till pristopp
+
+  sem_battery_cheap_mode:
+    name: Billigt elpris aktivt
+
+  sem_ev_wallbox_single: 
+    name: "Wallbox Single"
+
+  sem_ev_wallbox_multi: 
+    name: "Wallbox Multi"
+  
+  sem_solar_2: 
+    name: "Solar two directions"
+
+  sem_ev_charging_protection_status:
+    name: "EV Protection status"
+
+  sem_setting_view:
+    name: "Setting view"
+
+  sem_export_limit_active:
+    name: "Reduce sunexport"
+
+  sem_max_export_active:
+    name: "Status reduced sunexport"
+
+  sem_manual_charge:
+    name: "Manual charge"
+
+  sem_interval_1a:
+    name: "Interval 1a"
+  
+  sem_interval_2:
+    name: "Interval 2" 
+    
+  sem_use_official_nordpool:
+    name: "Use Official Nordpool Sensor"
+  
+  sem_discharge_high_prices: 
+    name: "Discharge on hight prices"
+  
+  sem_discharge:
+    name: "Discharge"
+
+  sem_step_0: 
+    name: step 0
+
+  sem_step_1: 
+    name: step 1
+
+  sem_step_2: 
+    name: step 2
+
+  sem_step_3: 
+    name: step 3
+  
+  sem_step_4:
+    name: step 4
+  
+  sem_step_5:
+    name: step 5
+  
+  sem_fast_choice: 
+    name: Snabbval
+
+  sem_ev_charged_today:
+    name: Ev charge
+  
+  manual_update_packages:
+    name: Update package
+
+  sem_download: 
+    name: "Downloading"
+  
+  sem_download_finished: 
+    name: "Download finished"
+
+  sem_submit_user_info: 
+    name: "Send"
+  
+  sem_ev_integrated: 
+    name: EV integrated
+
+  sem_more_info_system:
+    name: Mer information om systemetsdriftplan
+  
+  sem_activate_ai: 
+    name: Aktivera AI-analys
+    
+  sem_test: 
+    name: TEST BOOLEAN
+  
+  sem_ev_charge_active:
+    name: EV charge
+
+  sem_ev_settings: 
+    name: Settings EV-charge
+
+  sem_ev_adjust_charge_time: 
+    name: Adjust Time
+
+  sem_ev_balance: 
+    name: EV Balance
+  
+  sem_override_charge:
+    name: Ändra laddningsbeslut
+
+  sem_override_export:
+    name: Change export decision 
+
+  sem_smart_charge_ev: 
+    name: Aktivera smartladdning av elbil
+
+  sem_auto_update: 
+    name: Automatisk uppdatering
+    
+  sem_battery_setup:
+    name: Battery setup
+    
+  sem_battery_charge_now:
+    name: Battery charge now
+    
+  sem_battery_smart:
+    name: Battery smart
+
+  sem_battery_mix:
+    name: Battery mix
+  
+  sem_battery_solar_more_info:
+    name: Battery solar more info
+
+  sem_battery_solar_smart:
+    name: Battery solar smart
+
+  sem_grid_setup:
+    name: Grid setup
+    
+  sem_house_more_info:
+    name: House more info
+    
+  sem_update_notification: 
+    name: New Update Notify
+
+  sem_ink_ev:
+    name: Ink EV
+
+  sem_settings_change:
+    name: More settings change
+
+  sem_settings_export:
+    name: More settings export
+############ZAPTEC#########################
+  sem_ev_charger_1_charging_completed:
+    name: SEM EV Charger 1 Charging Completed
+
+  sem_ev_charger_2_charging_completed:
+    name: SEM EV Charger 2 Charging Completed

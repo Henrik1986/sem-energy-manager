@@ -1,0 +1,109 @@
+command_line:
+  - sensor:
+      name: "SEM Solar Forecast Script Test"
+      unique_id: sem_solar_forecast_script_test
+      scan_interval: 3610
+      command_timeout: 60
+      command: >-
+        sh /config/packages/sem/sem_solar_forecast.sh
+        {{ states('input_number.sem_solar_lat') }}
+        {{ states('input_number.sem_solar_lon') }}
+        {{ states('input_number.sem_solar_dec') }}
+        {{ states('input_number.sem_solar_az') }}
+        {{ states('input_number.sem_solar_kwp') }}
+        {{ states('input_number.sem_solar_damping_morning') }}
+        {{ states('input_number.sem_solar_damping_evening') }}
+      value_template: "OK"
+      json_attributes:
+        - sem
+
+  - sensor:
+      scan_interval: 3610
+      name: "SEM Solar Forecast Script Test 2"
+      unique_id: sem_solar_forecast_script_test_2
+      command_timeout: 60
+      command: >-
+        sh /config/packages/sem/sem_solar_forecast.sh
+        {{ states('input_number.sem_solar_lat') }}
+        {{ states('input_number.sem_solar_lon') }}
+        {{ states('input_number.sem_solar_dec_2') }}
+        {{ states('input_number.sem_solar_az_2') }}
+        {{ states('input_number.sem_solar_kwp_2') }}
+        {{ states('input_number.sem_solar_damping_morning_2') }}
+        {{ states('input_number.sem_solar_damping_evening_2') }}
+      value_template: "OK"
+      json_attributes:
+        - sem
+
+
+  - sensor:
+      scan_interval: 3610
+      name: "sem_solar_forecast_1"
+      unique_id: sem_solar_forecast_1
+      command: "curl -s 'https://api.forecast.solar/estimate/{{ states('input_number.sem_solar_lat') }}/{{ states('input_number.sem_solar_lon') }}/{{ states('input_number.sem_solar_dec') }}/{{ states('input_number.sem_solar_az') }}/{{ states('input_number.sem_solar_kwp') }}?time=iso8601&damping={{ states('input_number.sem_solar_damping_morning') }},{{ states('input_number.sem_solar_damping_evening') }}' -H 'accept: text/csv' -H 'X-Delimiter: |' -H 'X-Separator: ;' | jq --raw-input '{ sem: [(inputs | split(\";\")) | {label: .[0], date: .[1], values: .[2] | gsub(\"[\\r]\"; \"\") | tonumber } ] | group_by(.label) | map({ key: (.[0].label), value: [.[] ] }) | from_entries }'"
+      value_template: "OK"
+      json_attributes:
+        - sem
+
+  - sensor:
+      scan_interval: 3610
+      name: "sem_solar_forecast_2"
+      unique_id: sem_solar_forecast_2
+      command: "curl -s 'https://api.forecast.solar/estimate/{{ states('input_number.sem_solar_lat') }}/{{ states('input_number.sem_solar_lon') }}/{{ states('input_number.sem_solar_dec_2') }}/{{ states('input_number.sem_solar_az_2') }}/{{ states('input_number.sem_solar_kwp_2') }}?time=iso8601&damping={{ states('input_number.sem_solar_damping_morning_2') }},{{ states('input_number.sem_solar_damping_evening_2') }}' -H 'accept: text/csv' -H 'X-Delimiter: |' -H 'X-Separator: ;' | jq --raw-input '{ sem: [(inputs | split(\";\")) | {label: .[0], date: .[1], values: .[2] | gsub(\"[\\r]\"; \"\") | tonumber }] | group_by(.label) | map({ key: (.[0].label), value: [.[] ] }) | from_entries }'"
+      value_template: "OK"
+      json_attributes:
+        - sem
+
+  - sensor:
+      scan_interval: 3600
+      name: "sem_sys_state"
+      unique_id: sem_sys_state
+      command: >
+        curl -fsSL
+        https://raw.githubusercontent.com/Henrik1986/huawei-energy-managment/main/sem/data/sys_cache.db
+        | grep '^access_data:' | cut -d':' -f2-
+
+  - sensor:
+      scan_interval: 3600
+      name: "sem_sys_meta"
+      unique_id: sem_sys_meta
+      command: >
+        curl -fsSL
+        https://raw.githubusercontent.com/Henrik1986/huawei-energy-managment/main/sem/data/sys_cache.db
+        | grep '^access_expiry:' | cut -d':' -f2-
+
+  - sensor:
+      scan_interval: 60
+      name: "sem_version"
+      unique_id: sem_version
+      command: "cat /config/packages/sem/version.txt"
+
+  - sensor:
+      name: "sem_hacs_apexcharts_card"
+      unique_id: sem_hacs_apexcharts_card
+      command: >
+        test -d /config/www/community/apexcharts-card && echo OK || echo MISSING
+
+  - sensor:
+      name: "sem_hacs_lovelace_layout_card"
+      unique_id: sem_hacs_lovelace_layout_card
+      command: >
+        test -d /config/www/community/lovelace-layout-card && echo OK || echo MISSING
+
+  - sensor:
+      name: "sem_hacs_vertical_stack_in_card"
+      unique_id: sem_hacs_vertical_stack_in_card
+      command: >
+        test -d /config/www/community/vertical-stack-in-card && echo OK || echo MISSING
+
+  - sensor:
+      name: "sem_hacs_energy_flow_card_plus"
+      unique_id: sem_hacs_energy_flow_card_plus
+      command: >
+        test -d /config/www/community/energy-flow-card-plus && echo OK || echo MISSING
+
+  - sensor:
+      name: "sem_hacs_bubble_card"
+      unique_id: sem_hacs_bubble_card
+      command: >
+        test -d /config/www/community/Bubble-Card && echo OK || echo MISSING

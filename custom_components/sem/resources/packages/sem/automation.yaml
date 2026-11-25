@@ -1,0 +1,3124 @@
+automation:
+
+################################################################################
+  - alias: SEM - Reload NordPool at 14:30 and at midnight
+    mode: single
+    triggers:
+      - trigger: time
+        at: "14:30:00"
+      - trigger: time
+        at: "00:00:00"
+    actions:
+      - action: homeassistant.reload_config_entry
+        data:
+          entry_id: "{{ states('input_text.sem_nordpool_entry_inofficial') }}"
+
+################################################################################
+
+  - alias: SEM - Uppdatera installationsvärden
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_button.sem_update_installation_values
+
+    conditions:
+      - condition: template
+        value_template: >
+          {% set capacity = 'sensor.sem_energy_system_sem_battery_rated_capacity' %}
+          {% set charge = 'number.sem_energy_system_sem_grid_charge_maximum_power' %}
+          {% set discharge = 'number.sem_energy_system_sem_maximum_discharging_power' %}
+
+          {{
+            states(capacity) | is_number
+            and states(charge) | is_number
+            and states(discharge) | is_number
+            and states(capacity) | float(0) > 0
+            and states(charge) | float(0) > 0
+            and states(discharge) | float(0) > 0
+            and state_attr(capacity, 'unit_of_measurement') in ['Wh', 'kWh']
+            and state_attr(charge, 'unit_of_measurement') in ['W', 'kW']
+            and state_attr(discharge, 'unit_of_measurement') in ['W', 'kW']
+          }}
+
+    actions:
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.sem_installation_status
+        data:
+          value: "Konfigurerar..."
+
+      - delay:
+          seconds: 2
+
+      # Batterikapacitet
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_battery_total_capacity_kwh
+        data:
+          value: >
+            {% set entity = 'sensor.sem_energy_system_sem_battery_rated_capacity' %}
+            {% set value = states(entity) | float %}
+            {{ value / 1000 if state_attr(entity, 'unit_of_measurement') == 'Wh' else value }}
+
+      # Maximal laddningseffekt från elnätet
+      - action: input_number.set_value
+        target:
+          entity_id:
+            - input_number.sem_max_charge_power_window_1
+            - input_number.sem_max_charge_power_window_2
+            - input_number.sem_max_charge_manual_charging
+        data:
+          value: >
+            {% set entity = 'number.sem_energy_system_sem_grid_charge_maximum_power' %}
+            {% set value = states(entity) | float %}
+            {{ value / 1000 if state_attr(entity, 'unit_of_measurement') == 'W' else value }}
+
+      # Maximal urladdningseffekt från batteriet
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_battery_discharge_power_ev_limit
+        data:
+          value: >
+            {% set entity = 'number.sem_energy_system_sem_maximum_discharging_power' %}
+            {% set value = states(entity) | float %}
+            {{ value / 1000 if state_attr(entity, 'unit_of_measurement') == 'W' else value }}
+
+      # Hämta position från Home
+      - if:
+          - condition: template
+            value_template: >
+              {{ has_value('zone.home')
+                 and state_attr('zone.home', 'latitude') is not none
+                 and state_attr('zone.home', 'longitude') is not none }}
+        then:
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.sem_solar_lat
+            data:
+              value: "{{ state_attr('zone.home', 'latitude') }}"
+
+          - action: input_number.set_value
+            target:
+              entity_id: input_number.sem_solar_lon
+            data:
+              value: "{{ state_attr('zone.home', 'longitude') }}"
+      
+      # Hämtar solinstrålningens dämpning
+      - action: input_number.set_value
+        target:
+          entity_id:
+            - input_number.sem_solar_damping_morning
+            - input_number.sem_solar_damping_evening
+        data:
+          value: 0
+
+      - delay:
+          seconds: 5
+
+      # Konfiguration färdig
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.sem_installation_status
+        data:
+          value: "Klart!"
+
+      - delay:
+          seconds: 60
+
+      # Rensa status
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.sem_installation_status
+        data:
+          value: ""
+
+################################################################################
+
+  - alias: SEM - Uppdatera exportstrategi
+    triggers:
+    - trigger: state
+      entity_id: input_number.sem_export_strategy
+    actions:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_export_profit_margin
+        data:
+          value: >
+            {{ (0.95 - states('input_number.sem_export_strategy') | float(5) * 0.1) | round(2) }}
+    mode: single
+################################################################################
+
+  - alias: SEM - UPDATE SEM Charging Strategy
+    triggers:
+      - trigger: state
+        entity_id: input_number.sem_charge_strategy
+    actions:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_charge_profit_threshold
+        data:
+          value: >
+            {{ (0.8 - (states('input_number.sem_charge_strategy') | float(5) - 1) * 0.0722222) | round(2) }}
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_low_price_threshold
+        data:
+          value: >
+            {{ (0.9 - (states('input_number.sem_charge_strategy') | float(5) - 1) * 0.05) | round(2) }}
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_cheap_charge_price_limit
+        data:
+          value: >
+            {{ (0.04 + (states('input_number.sem_charge_strategy') | float(5) - 1) * 0.04) | round(2) }}
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_cheap_charge_max_kwh
+        data:
+          value: >
+            {{ (
+              states('input_number.sem_battery_total_capacity_kwh') | float(0)
+              *
+              (10 + (states('input_number.sem_charge_strategy') | float(5) - 1) * 5) / 100
+            ) | round(2) }}
+    mode: single
+          
+################################################################################
+  - alias: SEM - Update Smart Charging When New Prices Arrive
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.sem_nordpool_tomorrow_prices_available
+        from: "off"
+        to: "on"
+    actions:
+      - action: input_button.press
+        target:
+          entity_id: input_button.sem_update_battery_cheapest_charge
+
+################################################################################
+  - alias: SEM - Reset 1a_2
+    mode: single
+    triggers:
+      - trigger: time
+        at: "23:30:00"
+    actions:
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.sem_battery_charge_override_1a_2
+        data:
+          option: "Auto"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_extra_1
+        data:
+          value: 0
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_battery_extra_export_1
+        data:
+          value: 0
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.sem_export_override_1
+        data:
+          option: "Auto"
+
+  - alias: SEM - Reset 2_1b
+    mode: single
+    triggers:
+      - trigger: time
+        at: "13:15:00"
+    actions:
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.sem_battery_charge_override_2_1b
+        data:
+          option: "Auto"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_extra_2
+        data:
+          value: 0
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_battery_extra_export_2
+        data:
+          value: 0
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.sem_export_override_2
+        data:
+          option: "Auto"
+      
+
+################################################################################
+  - alias: SEM - Scheduled charging 1a-2 with SoC control
+    mode: single
+    triggers:
+        - trigger: time_pattern
+          minutes: "/10"  
+        - trigger: template
+          value_template: >
+            {% set interval = states('sensor.sem_battery_charge_window_cheapest_1a') %}
+            {% if ' - ' in interval %}
+              {% set start = interval.split(' - ')[0] | as_datetime %}
+              {{ now() >= start and now() < start + timedelta(minutes=1) }}
+            {% else %}
+              false
+            {% endif %}
+        - trigger: template
+          value_template: >
+            {% set need = states('sensor.sem_battery_charge_energy_1a_2') %}
+            {{ is_number(need) and need | float <= 0 }}
+    condition:
+        - condition: state
+          entity_id: input_boolean.sem_manual_charge
+          state: "off" 
+        - condition: state
+          entity_id: binary_sensor.sem_available_control
+          state: "on"
+    action:
+        - choose:
+            # 1: Activate ToU (Time Of Use) if the battery needs charging within the interval
+            - conditions:
+                - condition: template
+                  value_template: >-
+                      {% set needed_kwh = states('sensor.sem_battery_charge_energy_1a_2') | float(0) %}
+                      {% set interval_raw = states('sensor.sem_battery_charge_window_cheapest_1a') %}
+                      {% if ' - ' not in interval_raw %}
+                          false
+                      {% else %}
+                          {% set start_str, end_str = interval_raw.split(' - ') %}
+                          {% set start_time = start_str | as_datetime %}
+                          {% set end_time = end_str | as_datetime %}
+                          {% set now_time = now() %}
+                          {{ start_time <= now_time <= end_time and needed_kwh > 0 }}
+                      {% endif %}
+                - condition: template
+                  value_template: >
+                    {% set ev_power = states('sensor.sem_ev_sensor_power') | float(0) %}
+                    {% set strategy = states('input_select.sem_ev_battery_strategy') %}
+                    {{ not (ev_power > 0 and strategy == 'Ladda elbil först') }}
+                - condition: template
+                  value_template: "{{ states('select.sem_energy_system_sem_battery_working_mode') != 'time_of_use' }}" 
+                - condition: template
+                  value_template: >
+                    {{ state_attr('sensor.sem_battery_charge_energy_1a_2', 'should_charge') | bool }}
+              sequence:
+                  - action: number.set_value
+                    target:
+                      entity_id: number.sem_energy_system_sem_grid_charge_maximum_power
+                    data:
+                      value: > 
+                        {{ (states('input_number.sem_max_charge_power_window_1') | float) * 1000 }}
+                  - action: input_boolean.turn_on
+                    target: 
+                        entity_id: input_boolean.sem_interval_1a 
+                  - action: sem.set_battery_time_of_use_periods
+                    data:
+                        periods: 00:00-23:59/1234567/+
+                  - delay: 00:01:00
+                  - action: select.select_option
+                    target:
+                        entity_id: select.sem_energy_system_sem_battery_working_mode
+                    data:
+                        option: "time_of_use"  
+            # 2: Stop charging if decision becomes false during charge window
+            - conditions:
+                - condition: template
+                  value_template: >-
+                      {% set needed_kwh = states('sensor.sem_battery_charge_energy_1a_2') | float(0) %}
+                      {% set interval_raw = states('sensor.sem_battery_charge_window_cheapest_1a') %}
+                      {% if ' - ' not in interval_raw %}
+                          false
+                      {% else %}
+                          {% set start_str, end_str = interval_raw.split(' - ') %}
+                          {% set start_time = start_str | as_datetime %}
+                          {% set end_time = end_str | as_datetime %}
+                          {% set now_time = now() %}
+                          {{ start_time <= now_time <= end_time and needed_kwh > 0 }}
+                      {% endif %}
+                - condition: template
+                  value_template: >
+                    {{ not (state_attr('sensor.sem_battery_charge_energy_1a_2', 'should_charge') | bool) }}                    
+                - condition: state
+                  entity_id: select.sem_energy_system_sem_battery_working_mode
+                  state: "time_of_use"
+              sequence:
+                  - action: select.select_option
+                    target:
+                        entity_id: select.sem_energy_system_sem_battery_working_mode
+                    data:
+                        option: "self_consumption"
+            # 3: Default mode Maximize self-consumption otherwise
+            - conditions:
+                  - condition: template
+                    value_template: >-
+                        {% set needed_kwh = states('sensor.sem_battery_charge_energy_1a_2') | float(0) %}
+                        {% set interval_raw = states('sensor.sem_battery_charge_window_cheapest_1a') %}
+                        {% if ' - ' not in interval_raw %}
+                            true
+                        {% else %}
+                            {% set start_str, end_str = interval_raw.split(' - ') %}
+                            {% set start_time = start_str | as_datetime %}
+                            {% set end_time = end_str | as_datetime %}
+                            {% set now_time = now() %}
+                            {{ needed_kwh <= 0 or not (start_time <= now_time <= end_time) }}
+                        {% endif %}
+                  - condition: state
+                    entity_id: input_boolean.sem_interval_1a
+                    state: 'on'     
+              sequence:
+                  - action: select.select_option
+                    target:
+                        entity_id: select.sem_energy_system_sem_battery_working_mode
+                    data:
+                        option: "self_consumption" 
+                  - action: input_boolean.turn_off
+                    target: 
+                        entity_id: input_boolean.sem_interval_1a
+                  - action: input_select.select_option
+                    target:
+                      entity_id: input_select.sem_battery_charge_override_1a_2
+                    data:
+                      option: "Auto"
+
+################################################################################
+  - alias: SEM - Scheduled charging 2-1a with SoC control
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        minutes: "/10" 
+      - trigger: template
+        value_template: >
+          {% set interval = states('sensor.sem_battery_charge_window_cheapest_2') %}
+          {% if ' - ' in interval %}
+            {% set start = interval.split(' - ')[0] | as_datetime %}
+            {{ now() >= start and now() < start + timedelta(minutes=1) }}
+          {% else %}
+            false
+          {% endif %}
+      - trigger: template
+        value_template: >
+          {% set need = states('sensor.sem_battery_charge_energy_2_1b') %}
+          {{ is_number(need) and need | float <= 0 }}
+    condition:
+      - condition: state
+        entity_id: input_boolean.sem_manual_charge
+        state: "off"
+      - condition: state
+        entity_id: binary_sensor.sem_available_control
+        state: "on"
+    action:
+      - choose:
+          # 1: Activate ToU (Time Of Use) if the battery needs charging within the interval
+          - conditions:
+              - condition: template
+                value_template: >-
+                  {% set needed_kwh = states('sensor.sem_battery_charge_energy_2_1b') | float(0) %}
+                  {% set interval_raw = states('sensor.sem_battery_charge_window_cheapest_2') %}
+                  {% if ' - ' not in interval_raw %}
+                    false
+                  {% else %}
+                    {% set start_str, end_str = interval_raw.split(' - ') %}
+                    {% set start_time = start_str | as_datetime %}
+                    {% set end_time = end_str | as_datetime %}
+                    {% set now_time = now() %}
+                    {{ start_time <= now_time <= end_time and needed_kwh > 0 }}
+                  {% endif %}
+              - condition: template
+                value_template: >
+                  {% set ev_power = states('sensor.sem_ev_sensor_power') | float(0) %}
+                  {% set strategy = states('input_select.sem_ev_battery_strategy') %}
+                  {{ not (ev_power > 0 and strategy == 'Ladda elbil först') }}
+              - condition: template
+                value_template: "{{ states('select.sem_energy_system_sem_battery_working_mode') != 'time_of_use' }}" 
+              - condition: template
+                value_template: >
+                    {{ state_attr('sensor.sem_battery_charge_energy_2_1b', 'should_charge') | bool }}
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.sem_energy_system_sem_grid_charge_maximum_power
+                data:
+                  value: > 
+                    {{ (states('input_number.sem_max_charge_power_window_2') | float) * 1000 }}
+              - action: input_boolean.turn_on
+                target: 
+                  entity_id: input_boolean.sem_interval_2 
+              - action: sem.set_battery_time_of_use_periods
+                data:
+                  periods: 00:00-23:59/1234567/+
+              - delay: 00:01:00
+              - action: select.select_option
+                target:
+                  entity_id: select.sem_energy_system_sem_battery_working_mode
+                data:
+                  option: "time_of_use" 
+            # 2: Stop charging if decision becomes false during charge window
+          - conditions:
+              - condition: template
+                value_template: >-
+                    {% set needed_kwh = states('sensor.sem_battery_charge_energy_2_1b') | float(0) %}
+                    {% set interval_raw = states('sensor.sem_battery_charge_window_cheapest_2') %}
+                    {% if ' - ' not in interval_raw %}
+                        false
+                    {% else %}
+                        {% set start_str, end_str = interval_raw.split(' - ') %}
+                        {% set start_time = start_str | as_datetime %}
+                        {% set end_time = end_str | as_datetime %}
+                        {% set now_time = now() %}
+                        {{ start_time <= now_time <= end_time and needed_kwh > 0 }}
+                    {% endif %}
+              - condition: template
+                value_template: >
+                  {{ not (state_attr('sensor.sem_battery_charge_energy_2_1b', 'should_charge') | bool) }}
+              - condition: state
+                entity_id: select.sem_energy_system_sem_battery_working_mode
+                state: "time_of_use"
+            sequence:
+                - action: select.select_option
+                  target:
+                      entity_id: select.sem_energy_system_sem_battery_working_mode
+                  data:
+                      option: "self_consumption"
+          # 3: Default mode Maximize self-consumption otherwise
+          - conditions:
+              - condition: template
+                value_template: >-
+                    {% set needed_kwh = states('sensor.sem_battery_charge_energy_2_1b') | float(0) %}
+                    {% set interval_raw = states('sensor.sem_battery_charge_window_cheapest_2') %}
+                    {% if ' - ' not in interval_raw %}
+                        true
+                    {% else %}
+                        {% set start_str, end_str = interval_raw.split(' - ') %}
+                        {% set start_time = start_str | as_datetime %}
+                        {% set end_time = end_str | as_datetime %}
+                        {% set now_time = now() %}
+                        {{ needed_kwh <= 0 or not (start_time <= now_time <= end_time) }}
+                    {% endif %}
+              - condition: state
+                entity_id: input_boolean.sem_interval_2
+                state: 'on'    
+            sequence:
+                - action: select.select_option
+                  target:
+                      entity_id: select.sem_energy_system_sem_battery_working_mode
+                  data:
+                      option: "self_consumption"  
+                - action: input_boolean.turn_off
+                  target: 
+                      entity_id: input_boolean.sem_interval_2
+                - action: input_select.select_option
+                  target:
+                    entity_id: input_select.sem_battery_charge_override_2_1b
+                  data:
+                    option: "Auto"
+
+################################################################################
+  - alias: SEM - Start Manual Charging
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.sem_manual_charge
+        to: "on"
+    condition:
+      - condition: state
+        entity_id: binary_sensor.sem_available_control
+        state: "on"
+    actions:
+      - action: number.set_value
+        target:
+          entity_id: number.sem_energy_system_sem_grid_charge_maximum_power
+        data:
+          value: > 
+            {{ (states('input_number.sem_max_charge_manual_charging') | float) * 1000 }}
+      - action: sem.set_battery_time_of_use_periods
+        data:
+          periods: "00:00-23:59/1234567/+"
+      - delay: 00:00:20
+      - action: select.select_option
+        target:
+          entity_id: select.sem_energy_system_sem_battery_working_mode
+        data:
+          option: "time_of_use"
+      - action: timer.start
+        target:
+          entity_id: timer.sem_manual_charge_time
+        data:
+          duration: >
+            {{ (states('input_number.sem_manual_charge_duration') | float(default=60)) * 60 }}
+
+################################################################################
+  - alias: SEM - Stop Manual Charging
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.sem_manual_charge
+        to: "off"
+      - trigger: event
+        event_type: timer.finished
+        event_data:
+          entity_id: timer.sem_manual_charge_time
+    condition: 
+      - condition: state
+        entity_id: binary_sensor.sem_available_control
+        state: "on"
+    action:
+      - action: timer.finish
+        target:
+          entity_id: timer.sem_manual_charge_time
+      - action: select.select_option
+        target:
+          entity_id: select.sem_energy_system_sem_battery_working_mode
+        data:
+          option: "self_consumption"
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.sem_manual_charge
+
+################################################################################
+  - alias: SEM - Scheduled discharge during high electricity prices 
+    mode: single
+    triggers:
+        - trigger: time_pattern
+          minutes: "/5"  
+        - trigger: template
+          value_template: >
+            {% set available = states('sensor.sem_available_export_energy_1') %}
+            {{ is_number(available) and available | float <= 0 }}
+    condition:
+        - condition: state
+          entity_id: input_boolean.sem_manual_charge
+          state: "off"
+        - condition: state
+          entity_id: input_boolean.sem_discharge_high_prices
+          state: "on"
+        - condition: template
+          value_template: >
+            {% set user_code = states('input_text.sem_user_access_code') | trim %}
+            {% set codes_raw = states('sensor.sem_sys_state') %}
+            {% if user_code != '' and codes_raw %}
+              {% set codes_list = codes_raw.split(',') | map('trim') | list %}
+              {{ user_code in codes_list }}
+            {% else %}
+              false
+            {% endif %}
+        - condition: state
+          entity_id: binary_sensor.sem_available_control
+          state: "on"
+    action:
+      - choose:
+          # ==========================
+          # EXPORTERA BATTERI - FÖNSTER 1
+          # ==========================
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.sem_discharge
+                state: "off"
+              - condition: template
+                value_template: >
+                  {% set window = state_attr('sensor.sem_available_export_energy_1', 'export_window') %}
+                  {% set final_decision = state_attr('sensor.sem_available_export_energy_1', 'final_decision') | bool(false) %}
+
+                  {% if window %}
+                    {% set parts = window.split(' - ') %}
+
+                    {% if parts | length == 2 %}
+                      {% set start = as_datetime(parts[0]) %}
+                      {% set end = as_datetime(parts[1]) %}
+
+                      {{
+                        final_decision
+                        and now() >= start
+                        and now() <= end
+                      }}
+                    {% else %}
+                      false
+                    {% endif %}
+                  {% else %}
+                    false
+                  {% endif %}
+              - condition: template
+                value_template: >
+                  {{ states('sensor.sem_available_export_energy_1') | float(0) >= 1 }}
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.sem_discharge
+              - action: number.set_value
+                target:
+                  entity_id: number.sem_energy_system_sem_maximum_discharging_power
+                data:
+                  value: >
+                    {{ (states('input_number.sem_battery_discharge_power_ev_limit') | float(default=1)) * 1000 }}
+              - action: select.select_option
+                target:
+                  entity_id: select.sem_energy_system_sem_battery_working_mode
+                data:
+                  option: "feed_in_priority"
+          # ==========================
+          # EXPORTERA BATTERI - FÖNSTER 2
+          # ==========================
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.sem_discharge
+                state: "off"
+              - condition: template
+                value_template: >
+                  {% set window = state_attr('sensor.sem_available_export_energy_2', 'export_window') %}
+                  {% set final_decision = state_attr('sensor.sem_available_export_energy_2', 'final_decision') | bool(false) %}
+
+                  {% if window %}
+                    {% set parts = window.split(' - ') %}
+
+                    {% if parts | length == 2 %}
+                      {% set start = as_datetime(parts[0]) %}
+                      {% set end = as_datetime(parts[1]) %}
+
+                      {{
+                        final_decision
+                        and now() >= start
+                        and now() <= end
+                      }}
+                    {% else %}
+                      false
+                    {% endif %}
+                  {% else %}
+                    false
+                  {% endif %}
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.sem_discharge
+              - action: number.set_value
+                target:
+                  entity_id: number.sem_energy_system_sem_maximum_discharging_power
+                data:
+                  value: >
+                    {{ (states('input_number.sem_battery_discharge_power_ev_limit') | float(default=1)) * 1000 }}
+              - action: select.select_option
+                target:
+                  entity_id: select.sem_energy_system_sem_battery_working_mode
+                data:
+                  option: "feed_in_priority"
+          # ==========================
+          # NORMALDRIFT
+          # ==========================
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.sem_discharge
+                state: "on"
+              - condition: template
+                value_template: >
+                  {% set window1 = state_attr('sensor.sem_available_export_energy_1', 'export_window') %}
+                  {% set window2 = state_attr('sensor.sem_available_export_energy_2', 'export_window') %}
+
+                  {% set final_decision1 = state_attr('sensor.sem_available_export_energy_1', 'final_decision') | bool %}
+                  {% set final_decision2 = state_attr('sensor.sem_available_export_energy_2', 'final_decision') | bool %}
+
+                  {% set active1 = false %}
+                  {% set active2 = false %}
+
+                  {% if window1 %}
+                    {% set parts1 = window1.split(' - ') %}
+                    {% if parts1 | length == 2 %}
+                      {% set start1 = as_datetime(parts1[0]) %}
+                      {% set end1 = as_datetime(parts1[1]) %}
+
+                      {% set active1 = (
+                        states('sensor.sem_available_export_energy_1') | float(0) > 0
+                        and final_decision1
+                        and now() >= start1
+                        and now() <= end1
+                      ) %}
+                    {% endif %}
+                  {% endif %}
+
+                  {% if window2 %}
+                    {% set parts2 = window2.split(' - ') %}
+                    {% if parts2 | length == 2 %}
+                      {% set start2 = as_datetime(parts2[0]) %}
+                      {% set end2 = as_datetime(parts2[1]) %}
+
+                      {% set active2 = (
+                        states('sensor.sem_available_export_energy_2') | float(0) > 0
+                        and final_decision2
+                        and now() >= start2
+                        and now() <= end2
+                      ) %}
+                    {% endif %}
+                  {% endif %}
+
+                  {{ not (active1 or active2) }}
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.sem_energy_system_sem_maximum_discharging_power
+                data:
+                  value: >
+                    {{ (states('input_number.sem_battery_discharge_power_ev_limit') | float) * 1000 }}
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.sem_discharge
+              - action: select.select_option
+                target:
+                  entity_id: select.sem_energy_system_sem_battery_working_mode
+                data:
+                  option: "self_consumption"
+
+################################################################################
+  - alias: SEM - Reset export override 1 to Auto
+    mode: single
+    triggers:
+      - trigger: template
+        value_template: >
+          {% set window = states('sensor.sem_export_window_1') %}
+          {% if window and ' - ' in window %}
+            {% set end_time = window.split(' - ')[1] | as_datetime %}
+            {{ now() >= end_time }}
+          {% else %}
+            false
+          {% endif %}
+    conditions:
+      - condition: state
+        entity_id: input_select.sem_export_override_1
+        state:
+          - "Exportera"
+          - "Exportera ej"
+    actions:
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.sem_export_override_1
+        data:
+          option: "Auto"
+
+
+
+  - alias: SEM - Reset export override 2 to Auto
+    mode: single
+    triggers:
+      - trigger: template
+        value_template: >
+          {% set window = states('sensor.sem_export_window_2') %}
+          {% if window and ' - ' in window %}
+            {% set end_time = window.split(' - ')[1] | as_datetime %}
+            {{ now() >= end_time }}
+          {% else %}
+            false
+          {% endif %}
+    conditions:
+      - condition: state
+        entity_id: input_select.sem_export_override_2
+        state: 
+          - "Exportera"
+          - "Exportera ej"
+    actions:
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.sem_export_override_2
+        data:
+          option: "Auto"
+
+################################################################################
+  - alias: SEM - Control solar export based on electricity price
+    triggers:
+      - trigger: state
+        entity_id: sensor.sem_nordpool_sensor_state
+      - trigger: time_pattern
+        minutes: "/15"
+    condition:
+      - condition: template
+        value_template: >
+          {% set user_code = states('input_text.sem_user_access_code') | trim %}
+          {% set codes_raw = states('sensor.sem_sys_state') %}
+          {% if user_code != '' and codes_raw %}
+            {% set codes_list = codes_raw.split(',') | map('trim') | list %}
+            {{ user_code in codes_list }}
+          {% else %}
+            false
+          {% endif %}
+      - condition: state
+        entity_id: input_boolean.sem_export_limit_active
+        state: 'on'
+      - condition: state
+        entity_id: binary_sensor.sem_available_control
+        state: "on"
+    action:
+        - choose:
+
+            # Begränsa export (inom intervallet)
+            - conditions:
+                - condition: state
+                  entity_id: input_boolean.sem_export_limit_active
+                  state: 'on'
+                - condition: template
+                  value_template: >
+                    {% set interval = states('sensor.sem_export_limit') %}
+
+                    {% if interval and ' - ' in interval %}
+                      {% set start = as_datetime(interval.split(' - ')[0]) %}
+                      {% set end   = as_datetime(interval.split(' - ')[1]) %}
+
+                      {{ now() >= start
+                         and now() <= end
+                         and is_state('input_boolean.sem_max_export_active', 'off') }}
+
+                    {% else %}
+                      false
+                    {% endif %}
+              sequence:
+                - action: sem.set_grid_export_power_limit
+                  data:
+                    power: "300"
+                - action: input_boolean.turn_on
+                  target:
+                    entity_id: input_boolean.sem_max_export_active
+
+            # Återställ export (utanför intervallet)
+            - conditions:
+                - condition: template
+                  value_template: >
+                    {% set interval = states('sensor.sem_export_limit') %}
+
+                    {% if interval and ' - ' in interval %}
+                      {% set start = as_datetime(interval.split(' - ')[0]) %}
+                      {% set end   = as_datetime(interval.split(' - ')[1]) %}
+
+                      {{ (now() < start or now() > end)
+                         and is_state('input_boolean.sem_max_export_active', 'on') }}
+
+                    {% else %}
+                      true
+                    {% endif %}
+              sequence:
+                - action: sem.reset_grid_export_power_limit
+                - action: input_boolean.turn_off
+                  target:
+                    entity_id: input_boolean.sem_max_export_active
+    mode: single
+
+################################################################################
+  - alias: SEM - EV Charging Protection
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: 
+          - input_select.sem_ev_battery_strategy
+      - trigger: state
+        entity_id: 
+          - sensor.sem_ev_sensor_state
+          - sensor.sem_ev_sensor_state_2
+      - trigger: template
+        value_template: >
+          {% set w = states('sensor.sem_battery_charge_window_cheapest_1a') %}
+          {% if ' - ' in w %}
+            {% set start = as_timestamp(w.split(' - ')[0]) %}
+            {% set end = as_timestamp(w.split(' - ')[1]) %}
+            {{ now().timestamp() >= start and now().timestamp() <= end }}
+          {% else %}
+            false
+          {% endif %}
+      - trigger: template
+        value_template: >
+          {% set w = states('sensor.sem_battery_charge_window_cheapest_2') %}
+          {% if ' - ' in w %}
+            {% set start = as_timestamp(w.split(' - ')[0]) %}
+            {% set end = as_timestamp(w.split(' - ')[1]) %}
+            {{ now().timestamp() >= start and now().timestamp() <= end }}
+          {% else %}
+            false
+          {% endif %}
+      - trigger: time_pattern
+        minutes: "/15"
+    condition:
+      - condition: state
+        entity_id: input_boolean.sem_ev_charging_protection_enabled
+        state: "on"
+      - condition: template
+        value_template: >
+          {% set user_code = states('input_text.sem_user_access_code') | trim %}
+          {% set codes_raw = states('sensor.sem_sys_state') %}
+          {% if user_code != '' and codes_raw %}
+            {% set codes_list = codes_raw.split(',') | map('trim') | list %}
+            {{ user_code in codes_list }}
+          {% else %}
+            false
+          {% endif %}
+      - condition: state
+        entity_id: binary_sensor.sem_available_control
+        state: "on"
+
+    action:
+      - choose:
+
+      # ==========================================================
+      # 1️⃣ EV LADDAR
+      # ==========================================================
+          - conditions:
+              - condition: template
+                value_template: >
+                  {% set s1 = states('sensor.sem_ev_sensor_state') %}
+                  {% set s2 = states('sensor.sem_ev_sensor_state_2') %}
+                  {% set c1 = states('input_text.sem_ev_charging_state') %}
+                  {% set c2 = states('input_text.sem_ev_charging_state_2') %}
+                  {% set valid1 = s1 not in ['unknown','unavailable','none'] %}
+                  {% set valid2 = s2 not in ['unknown','unavailable','none'] %}
+                  {{ (valid1 and s1 == c1) or (valid2 and s2 == c2) }}
+            sequence:
+              - choose:
+                  # ==========================================
+                  # 🟢 Ladda elbil först
+                  # ==========================================
+                  - conditions:
+                      - condition: state
+                        entity_id: input_select.sem_ev_battery_strategy
+                        state: "Ladda elbil först"
+                    sequence:
+                      # Stoppa ALLTID urladdning
+                      - action: number.set_value
+                        target:
+                          entity_id: number.sem_energy_system_sem_maximum_discharging_power
+                        data:
+                          value: 0                          
+                      - action: input_boolean.turn_on
+                        target:
+                          entity_id: input_boolean.sem_ev_charging_protection_status
+                      # Kontrollera laddningsfönster
+                      - choose:
+                          - conditions:
+                              - condition: template
+                                value_template: >
+                                  {% set now_ts = as_timestamp(now()) %}
+                                  {% set w1 = states('sensor.sem_battery_charge_window_cheapest_1a') %}
+                                  {% set w2 = states('sensor.sem_battery_charge_window_cheapest_2') %}
+                                  {% set ns = namespace(in_window=false) %}
+                                  {% for w in [w1, w2] %}
+                                    {% if w not in ['unknown','unavailable',''] and ' - ' in w %}
+                                      {% set start = as_timestamp(w.split(' - ')[0]) %}
+                                      {% set end = as_timestamp(w.split(' - ')[1]) %}                                      {% if now_ts >= start and now_ts <= end %}
+                                        {% set ns.in_window = true %}
+                                      {% endif %}
+                                    {% endif %}
+                                  {% endfor %}
+                                  {{ ns.in_window }}
+                            sequence:
+                              # Endast inom fönster → stoppa grid charge
+                              - action: number.set_value
+                                target:
+                                  entity_id: number.sem_energy_system_sem_grid_charge_maximum_power
+                                data:
+                                  value: 0
+                  # ==========================================
+                  # Dela effekt
+                  # ==========================================
+                  - conditions:
+                      - condition: state
+                        entity_id: input_select.sem_ev_battery_strategy
+                        state: "Dela effekt"
+                    sequence:
+                      - action: number.set_value
+                        target:
+                          entity_id: number.sem_energy_system_sem_maximum_discharging_power
+                        data:
+                          value: 0
+                      - action: number.set_value
+                        target:
+                          entity_id: number.sem_energy_system_sem_grid_charge_maximum_power
+                        data:
+                          value: >
+                            {{ (states('input_number.sem_battery_grid_normal_power') | float) * 1000 }} 
+                      - action: input_boolean.turn_on
+                        target:
+                          entity_id: input_boolean.sem_ev_charging_protection_status
+
+                  # ==========================================
+                  # Ladda elbil till viss procent
+                  # ==========================================
+                  - conditions:
+                      - condition: state
+                        entity_id: input_select.sem_ev_battery_strategy
+                        state: "Ladda elbil till en viss procent"
+                      - condition: state
+                        entity_id: input_boolean.sem_ev_integrated
+                        state: "on"
+                    sequence:
+                      - choose:
+                          # Elbil under mål → all effekt till EV, batteriet laddar ej
+                          - conditions:
+                              - condition: template
+                                value_template: >
+                                  {{ states('sensor.car_battery_level') | float(0)
+                                    < states('input_number.sem_ev_charge_goal') | float(0) }}
+                            sequence:
+                            # Stoppa ALLTID urladdning
+                            - action: number.set_value
+                              target:
+                                entity_id: number.sem_energy_system_sem_maximum_discharging_power
+                              data:
+                                value: 0                          
+                            - action: input_boolean.turn_on
+                              target:
+                                entity_id: input_boolean.sem_ev_charging_protection_status
+                            # Kontrollera laddningsfönster
+                            - choose:
+                                - conditions:
+                                    - condition: template
+                                      value_template: >
+                                        {% set now_ts = as_timestamp(now()) %}
+                                        {% set w1 = states('sensor.sem_battery_charge_window_cheapest_1a') %}
+                                        {% set w2 = states('sensor.sem_battery_charge_window_cheapest_2') %}
+                                        {% set ns = namespace(in_window=false) %}
+                                        {% for w in [w1, w2] %}
+                                          {% if w not in ['unknown','unavailable',''] and ' - ' in w %}
+                                            {% set start = as_timestamp(w.split(' - ')[0]) %}
+                                            {% set end = as_timestamp(w.split(' - ')[1]) %}
+                                            {% if now_ts >= start and now_ts <= end %}
+                                              {% set ns.in_window = true %}
+                                            {% endif %}
+                                          {% endif %}
+                                        {% endfor %}
+                                        {{ ns.in_window }}
+                                  sequence:
+                                    # Endast inom fönster → stoppa grid charge
+                                    - action: number.set_value
+                                      target:
+                                        entity_id: number.sem_energy_system_sem_grid_charge_maximum_power
+                                      data:
+                                        value: 0
+                          # Elbil uppnått mål → återställning
+                          - conditions:
+                              - condition: template
+                                value_template: >
+                                  {{ states('sensor.car_battery_level') | float(0)
+                                    >= states('input_number.sem_ev_charge_goal') | float(0) }}
+                            sequence:
+                              - choose:
+                                  - conditions:
+                                      - condition: state
+                                        entity_id: input_boolean.sem_ev_charging_protection_status
+                                        state: "on"
+                                    sequence:
+                                      - action: number.set_value
+                                        target:
+                                          entity_id: number.sem_energy_system_sem_maximum_discharging_power
+                                        data:
+                                          value: 0
+                                      - action: number.set_value
+                                        target:
+                                          entity_id: number.sem_energy_system_sem_grid_charge_maximum_power
+                                        data:
+                                          value: "{{ states('input_number.sem_battery_grid_normal_power') | float * 1000 }}"
+                                      - action: input_boolean.turn_on
+                                        target:
+                                          entity_id: input_boolean.sem_ev_charging_protection_status
+
+
+          # ==========================================================
+          # INGEN EV LADDAR
+          # ==========================================================
+          - conditions:
+              - condition: template
+                value_template: >
+                  {% set s1 = states('sensor.sem_ev_sensor_state') %}
+                  {% set s2 = states('sensor.sem_ev_sensor_state_2') %}
+                  {% set c1 = states('input_text.sem_ev_charging_state') %}
+                  {% set c2 = states('input_text.sem_ev_charging_state_2') %}
+
+                  {% set valid1 = s1 not in ['unknown','unavailable','none'] %}
+                  {% set valid2 = s2 not in ['unknown','unavailable','none'] %}
+
+                  {% set charging = 
+                    (valid1 and s1 == c1) or
+                    (valid2 and s2 == c2)
+                  %}
+
+                  {{ not charging }}
+
+              - condition: state
+                entity_id: input_boolean.sem_ev_charging_protection_status
+                state: "on"
+
+            sequence:
+
+              # 🔹 Återställ grid charge
+              - action: number.set_value
+                target:
+                  entity_id: number.sem_energy_system_sem_grid_charge_maximum_power
+                data:
+                  value: >
+                    {{ (states('input_number.sem_battery_grid_normal_power') | float) * 1000 }} 
+              
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.sem_ev_charging_protection_status
+
+              # 🔹 Återställ urladdning (endast om tillåtet)
+              - choose:
+                  - conditions:
+                      - condition: state
+                        entity_id: input_boolean.sem_battery_cheap_mode
+                        state: "off"
+
+                      - condition: state
+                        entity_id: input_boolean.sem_battery_save
+                        state: "off"
+
+                    sequence:
+                      - action: number.set_value
+                        target:
+                          entity_id: number.sem_energy_system_sem_maximum_discharging_power
+                        data:
+                          value: >
+                            {{ (states('input_number.sem_battery_discharge_power_ev_limit') | float) * 1000 }}
+
+################################################################################
+  - alias: SEM - EV Charge
+    triggers:
+      - trigger: template
+        value_template: >
+          {% set ev_sensor_id = states('input_text.sem_ev_sensor') %}
+          {% set ev = states(ev_sensor_id) | float(0) if ev_sensor_id else 0 %}
+          {{ ev > 0 }}
+    condition:
+      - condition: state
+        entity_id: input_boolean.sem_ev_charged_today
+        state: 'off'
+    actions:
+      - action: input_boolean.turn_on
+        entity_id: input_boolean.sem_ev_charged_today
+
+################################################################################
+  - alias: "SEM - EV Charge Restore"
+    triggers:
+      - trigger: time
+        at: "00:00:00"
+    actions:
+      - action: input_boolean.turn_off
+        entity_id: input_boolean.sem_ev_charged_today
+
+################################################################################
+  - alias: "SEM - EV DYNAMIC CHOOSE"
+    mode: single
+
+    triggers:
+      - trigger: homeassistant
+        event: start
+      - trigger: state
+        entity_id: input_boolean.sem_ev_integrated
+    actions:
+      - choose:
+          #EV-integration aktiv
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.sem_ev_integrated
+                state: "on"
+            sequence:
+              - action: input_select.set_options
+                target:
+                  entity_id: input_select.sem_ev_battery_strategy
+                data:
+                  options:
+                    - "Ladda elbil först"
+                    - "Ladda elbil till en viss procent"
+                    - "Dela effekt"
+          # EV-integration finns ej
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.sem_ev_integrated
+                state: "off"
+            sequence:
+              - action: input_select.set_options
+                target:
+                  entity_id: input_select.sem_ev_battery_strategy
+                data:
+                  options:
+                    - "Ladda elbil först"
+                    - "Dela effekt"
+              # Säkerställ giltigt val
+              - action: input_select.select_option
+                target:
+                  entity_id: input_select.sem_ev_battery_strategy
+                data:
+                  option: "Ladda elbil först"
+################################################################################
+  - alias: "SEM - Waitmode when cheap"
+    triggers:
+      - trigger: time_pattern
+        minutes: "/15"
+    condition:
+      - condition: template
+        value_template: >
+          {% set user_code = states('input_text.sem_user_access_code') | trim %}
+          {% set codes_raw = states('sensor.sem_sys_state') %}
+          {% if user_code != '' and codes_raw %}
+            {% set codes_list = codes_raw.split(',') | map('trim') | list %}
+            {{ user_code in codes_list }}
+          {% else %}
+            false
+          {% endif %}
+      - condition: state
+        entity_id: binary_sensor.sem_available_control
+        state: "on"
+
+    action:
+      - choose:
+
+          #################################################################
+          # 1. BILLIGT PRIS → SÄTT BATTERI I VILOLÄGE (0 W URLADDNING)
+          #################################################################
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.sem_battery_cheap_mode
+                state: "off" 
+              - condition: template
+                value_template: >
+                  {% set now_local = now() | as_local %}
+
+                  {# Interval 1 #}
+                  {% set i1 = states('sensor.sem_battery_cheap_interval_2_1a') %}
+                  {% set r1 = false %}
+                  {% if i1 not in ['', 'unknown', 'unavailable'] %}
+                    {% set p = i1.split(' - ') %}
+                    {% set s = p[0] | trim | as_datetime | as_local %}
+                    {% set e = p[1] | trim | as_datetime | as_local %}
+                    {% if s <= e %} 
+                      {% set r1 = s <= now_local <= e %}
+                    {% else %}
+                      {% set r1 = now_local >= s or now_local <= e %}
+                    {% endif %}
+                  {% endif %}
+
+                  {# Interval 2 #}
+                  {% set i2 = states('sensor.sem_battery_cheap_interval_1a_2') %}
+                  {% set r2 = false %}
+                  {% if i2 not in ['', 'unknown', 'unavailable'] %}
+                    {% set p = i2.split(' - ') %}
+                    {% set s = p[0] | trim | as_datetime | as_local %}
+                    {% set e = p[1] | trim | as_datetime | as_local %}
+                    {% if s <= e %} 
+                      {% set r2 = s <= now_local <= e %}
+                    {% else %}
+                      {% set r2 = now_local >= s or now_local <= e %}
+                    {% endif %}
+                  {% endif %}
+
+                  {{ r1 or r2 }}
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.sem_energy_system_sem_maximum_discharging_power
+                data:
+                  value: "0"
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.sem_battery_cheap_mode
+
+
+          #################################################################
+          # 2A. NORMALPRIS → ÅTERSTÄLL URLADDNINGSEFFEKTER, ELBILEN LADDAR INTE OCH INTE SPAR INNAN PRISTOPP
+          #################################################################
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.sem_battery_cheap_mode
+                state: "on"
+              - condition: state
+                entity_id: input_boolean.sem_battery_save
+                state: "off"
+              - condition: state
+                entity_id: input_boolean.sem_ev_charging_protection_status
+                state: "off"
+
+              - condition: template
+                value_template: >
+                  {% set now_local = now() | as_local %}
+
+                  {# Interval 1 #}
+                  {% set i1 = states('sensor.sem_battery_cheap_interval_2_1a') %}
+                  {% set r1 = false %}
+                  {% if i1 not in ['', 'unknown', 'unavailable'] %}
+                    {% set p = i1.split(' - ') %}
+                    {% set s = p[0] | trim | as_datetime | as_local %}
+                    {% set e = p[1] | trim | as_datetime | as_local %}
+                    {% if s <= e %} 
+                      {% set r1 = s <= now_local <= e %}
+                    {% else %}
+                      {% set r1 = now_local >= s or now_local <= e %}
+                    {% endif %}
+                  {% endif %}
+
+                  {# Interval 2 #}
+                  {% set i2 = states('sensor.sem_battery_cheap_interval_1a_2') %}
+                  {% set r2 = false %}
+                  {% if i2 not in ['', 'unknown', 'unavailable'] %}
+                    {% set p = i2.split(' - ') %}
+                    {% set s = p[0] | trim | as_datetime | as_local %}
+                    {% set e = p[1] | trim | as_datetime | as_local %}
+                    {% if s <= e %} 
+                      {% set r2 = s <= now_local <= e %}
+                    {% else %}
+                      {% set r2 = now_local >= s or now_local <= e %}
+                    {% endif %}
+                  {% endif %}
+
+                  {{ not (r1 or r2) }}
+
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.sem_energy_system_sem_maximum_discharging_power
+                data:
+                  value: "{{ states('input_number.sem_battery_discharge_power_ev_limit') | float * 1000 }}"
+
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.sem_battery_cheap_mode
+
+          #################################################################
+          # 2B. NORMALPRIS MEN BATTERISPAR INNAN PRISTOPP AKTIV → SLÄCK ENDAST CHEAP MODE
+          #################################################################
+          - conditions:
+              - condition: state
+                entity_id: input_boolean.sem_battery_cheap_mode
+                state: "on"
+
+              - condition: state
+                entity_id: input_boolean.sem_battery_save
+                state: "on"
+
+              - condition: template
+                value_template: >
+                  {% set now_local = now() | as_local %}
+
+                  {# Interval 1 #}
+                  {% set i1 = states('sensor.sem_battery_cheap_interval_2_1a') %}
+                  {% set r1 = false %}
+                  {% if i1 not in ['', 'unknown', 'unavailable'] %}
+                    {% set p = i1.split(' - ') %}
+                    {% set s = p[0] | trim | as_datetime | as_local %}
+                    {% set e = p[1] | trim | as_datetime | as_local %}
+                    {% if s <= e %} 
+                      {% set r1 = s <= now_local <= e %}
+                    {% else %}
+                      {% set r1 = now_local >= s or now_local <= e %}
+                    {% endif %}
+                  {% endif %}
+
+                  {# Interval 2 #}
+                  {% set i2 = states('sensor.sem_battery_cheap_interval_1a_2') %}
+                  {% set r2 = false %}
+                  {% if i2 not in ['', 'unknown', 'unavailable'] %}
+                    {% set p = i2.split(' - ') %}
+                    {% set s = p[0] | trim | as_datetime | as_local %}
+                    {% set e = p[1] | trim | as_datetime | as_local %}
+                    {% if s <= e %} 
+                      {% set r2 = s <= now_local <= e %}
+                    {% else %}
+                      {% set r2 = now_local >= s or now_local <= e %}
+                    {% endif %}
+                  {% endif %}
+
+                  {{ not (r1 or r2) }}
+
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.sem_battery_cheap_mode
+
+################################################################################
+
+
+  - alias: "SEM - Battery use between 12-00"
+    triggers:
+      - trigger: time_pattern
+        minutes: "/5"
+    conditions:
+      - condition: template
+        value_template: >
+          {% set user_code = states('input_text.sem_user_access_code') | trim %}
+          {% set codes_raw = states('sensor.sem_sys_state') %}
+          {% if user_code != '' and codes_raw %}
+            {% set codes_list = codes_raw.split(',') | map('trim') | list %}
+            {{ user_code in codes_list }}
+          {% else %}
+            false
+          {% endif %}
+      - condition: state
+        entity_id: binary_sensor.sem_available_control
+        state: "on"
+      - condition: time
+        after: "12:00:00"
+        before: "23:59:59"
+      - condition: state
+        entity_id: input_boolean.sem_battery_cheap_mode
+        state: "off"
+    actions:
+      - choose:
+          # AKTIVERA BATTERISPARLÄGE FÖRE PRISTOPPEN; MEN FÖRST EFTER LADDFÖNSTRET
+          - conditions:
+              - condition: template
+                value_template: >
+                  {% set raw = states('sensor.sem_relative_expensive_price_1') %}
+                  {% set start = as_datetime(raw.split(' - ')[0]) if raw not in ['unknown', 'unavailable', 'none', ''] and ' - ' in raw else none %}
+                  {% set required = state_attr('sensor.sem_relative_expensive_price_1', 'kwh_required') | float(0) %}
+                  {% set current_kwh = state_attr('sensor.sem_battery_charge_energy_1a_2', 'battery_capacity') | float(0) %}
+
+                  {% set condition_result = start is not none
+                    and now() < start
+                    and required > 0
+                    and current_kwh <= required %}
+
+                  {{ condition_result }}
+              - condition: template
+                value_template: >
+                  {% set charge = states('sensor.sem_battery_charge_window_cheapest_1a_active') %}
+                  {% set peak = states('sensor.sem_relative_expensive_price_1') %}
+                  {% if ' - ' not in peak %}
+                    false
+                  {% else %}
+                    {% set peak_start = as_datetime(peak.split(' - ')[0]) %}
+                    {% if ' - ' not in charge %}
+                      true
+                    {% else %}
+                      {% set charge_end = as_datetime(charge.split(' - ')[1]) %}
+                      {% if charge_end is none or charge_end.year == 1900 %}
+                        true
+                      {% else %}
+                        {{ charge_end >= peak_start }}
+                      {% endif %}
+                    {% endif %}
+                  {% endif %}
+              - condition: state
+                entity_id: input_boolean.sem_battery_save
+                state: "off"
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.sem_energy_system_sem_maximum_discharging_power
+                data:
+                  value: 0
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.sem_battery_save
+          # ÅTERSTÄLL NORMAL URLADDNING NÄR PRISTOPPEN BÖRJAR
+          - conditions:
+              - condition: template
+                value_template: >
+                  {% set raw = states('sensor.sem_relative_expensive_price_1') %}
+                  {% if raw not in ['unknown', 'unavailable', 'none', ''] and ' - ' in raw %}
+                    {% set start = as_datetime(raw.split(' - ')[0]) %}
+                    {{ start is not none and now() >= start }}
+                  {% else %}
+                    false
+                  {% endif %}
+              - condition: state
+                entity_id: input_boolean.sem_battery_save
+                state: "on"
+              - condition: state
+                entity_id: input_boolean.sem_ev_charging_protection_status
+                state: "off"
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.sem_energy_system_sem_maximum_discharging_power
+                data:
+                  value: >
+                    {{ states('input_number.sem_battery_discharge_power_ev_limit') | float * 1000 }}
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.sem_battery_save
+    mode: single
+
+################################################################################
+
+  - alias: SEM - Battery use between 00-12
+    triggers:
+      - trigger: time_pattern
+        minutes: /5
+    conditions:
+      - condition: template
+        value_template: >
+          {% set user_code = states('input_text.sem_user_access_code') | trim %}
+          {% set codes_raw = states('sensor.sem_sys_state') %}
+          {% if user_code != '' and codes_raw %}
+            {% set codes_list = codes_raw.split(',') | map('trim') | list %}
+            {{ user_code in codes_list }}
+          {% else %}
+            false
+          {% endif %}
+      - condition: state
+        entity_id: binary_sensor.sem_available_control
+        state: 'on'
+      - condition: time
+        after: '00:00:00'
+        before: '12:00:00'
+      - condition: state
+        entity_id: input_boolean.sem_battery_cheap_mode
+        state: 'off'
+    actions:
+      - choose:
+      # AKTIVERA BATTERISPARLÄGE FÖRE PRISTOPPEN, MEN FÖRST EFTER LADDFÖNSTRET
+          - conditions:
+              - condition: template
+                value_template: >
+                  {% set raw = states('sensor.sem_relative_expensive_price_2') %}
+                  {% if raw not in ['unknown', 'unavailable', 'none', ''] and ' - ' in raw %}
+                    {% set start = as_datetime(raw.split(' - ')[0]) %}
+                    {% set required = state_attr('sensor.sem_relative_expensive_price_2', 'kwh_required') | float(0) %}
+                    {% set current_kwh = state_attr('sensor.sem_battery_charge_energy_2_1b', 'battery_capacity') | float(0) %}
+                    {{ start is not none and now() < start and required > 0 and current_kwh <= required }}
+                  {% else %}
+                    false
+                  {% endif %}
+              - condition: template
+                value_template: >
+                  {% set charge = states('sensor.sem_battery_charge_window_cheapest_2_active') %}
+                  {% set peak = states('sensor.sem_relative_expensive_price_2') %}
+                  {% if ' - ' not in peak %}
+                    false
+                  {% else %}
+                    {% set peak_start = as_datetime(peak.split(' - ')[0]) %}
+                    {% if ' - ' not in charge %}
+                      true
+                    {% else %}
+                      {% set charge_end = as_datetime(charge.split(' - ')[1]) %}
+                      {% if charge_end is none or charge_end.year == 1900 %}
+                        true
+                      {% else %}
+                        {{ charge_end >= peak_start }}
+                      {% endif %}
+                    {% endif %}
+                  {% endif %}
+              - condition: state
+                entity_id: input_boolean.sem_battery_save
+                state: 'off'
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.sem_energy_system_sem_maximum_discharging_power
+                data:
+                  value: 0
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.sem_battery_save
+          # ÅTERSTÄLL NORMAL URLADDNING NÄR PRISTOPPEN BÖRJAR
+          - conditions:
+              - condition: template
+                value_template: >
+                  {% set raw = states('sensor.sem_relative_expensive_price_2') %}
+                  {% if raw not in ['unknown', 'unavailable', 'none', ''] and ' - ' in raw %}
+                    {% set start = as_datetime(raw.split(' - ')[0]) %}
+                    {{ start is not none and now() >= start }}
+                  {% else %}
+                    false
+                  {% endif %}
+              - condition: state
+                entity_id: input_boolean.sem_battery_save
+                state: 'on'
+              - condition: state
+                entity_id: input_boolean.sem_ev_charging_protection_status
+                state: 'off'
+            sequence:
+              - action: number.set_value
+                target:
+                  entity_id: number.sem_energy_system_sem_maximum_discharging_power
+                data:
+                  value: >
+                    {{ states('input_number.sem_battery_discharge_power_ev_limit') | float * 1000 }}
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.sem_battery_save
+    mode: single
+
+################################################################################
+  - alias: "SEM - New user"
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.sem_submit_user_info
+        to: "on"
+    actions:
+      - action: rest_command.sem_send_user_info
+      - delay: "00:05:00"
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.sem_submit_user_info
+
+################################################################################
+  - alias: "SEM - Reset flags for update Home Assistant start"
+    triggers:
+      - trigger: homeassistant
+        event: start
+    actions:
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+            - input_boolean.sem_download_finished
+            - input_boolean.manual_update_packages
+
+################################################################################
+  - alias: SEM - Turn off config
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.sem_step_5
+        to: "on"
+      - trigger: state
+        entity_id: input_boolean.sem_setting_view
+        to: "off"
+    actions:
+      - action: input_boolean.turn_off
+        target:
+          entity_id:
+            - input_boolean.sem_step_0
+            - input_boolean.sem_step_1
+            - input_boolean.sem_step_2
+            - input_boolean.sem_step_3
+            - input_boolean.sem_step_4
+            - input_boolean.sem_step_5
+            - input_boolean.sem_setting_view
+            - input_boolean.sem_fast_choice
+
+################################################################################
+  - alias: SEM - Restart Home Assistant via Button
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_button.sem_restart_ha
+    actions:
+      - action: homeassistant.restart
+
+################################################################################
+  - alias: SEM - Update battery mix every 15 min
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        minutes: "/14"
+        seconds: "0"
+    actions:
+      # --- SOLAR ---
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_battery_solar_kwh
+        data:
+          value: >-
+            {% set total_capacity = states('input_number.sem_battery_total_capacity_kwh') | float(14) %}
+            {{ [(states('input_number.sem_battery_solar_kwh') | float + states('sensor.sem_battery_solar_delta') | float), total_capacity - (states('input_number.sem_battery_grid_kwh') | float)] | min | round(2) }}
+      # --- GRID ---
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_battery_grid_kwh
+        data:
+          value: >-
+            {% set total_capacity = states('input_number.sem_battery_total_capacity_kwh') | float(14) %}
+            {{ [(states('input_number.sem_battery_grid_kwh') | float + states('sensor.sem_battery_grid_delta') | float), total_capacity - (states('input_number.sem_battery_solar_kwh') | float)] | min | round(2) }}
+################################################################################
+  - alias: SEM - Calibrate battery mix
+    mode: single
+    triggers:
+      - trigger: time_pattern
+        hours: "/1"
+        minutes: "0"
+        seconds: "30"
+
+    actions:
+
+      # --- SPARA AKTUELLA VÄRDEN FÖRE KALIBRERING ---
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_battery_solar_calibration
+        data:
+          value: "{{ states('input_number.sem_battery_solar_kwh') | float(0) }}"
+
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_battery_grid_calibration
+        data:
+          value: "{{ states('input_number.sem_battery_grid_kwh') | float(0) }}"
+
+      # --- SPARA AKTUELL BATTERIENERGI ---
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_battery_calibration_actual
+        data:
+          value: >
+            {{ state_attr(
+                'sensor.sem_battery_charge_energy_1a_2',
+                'battery_capacity'
+              ) | float(0) }}
+
+      # --- SPARA DIFFERENSEN ---
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_battery_calibration_difference
+        data:
+          value: >
+            {{
+              (
+                state_attr(
+                  'sensor.sem_battery_charge_energy_1a_2',
+                  'battery_capacity'
+                ) | float(0)
+                -
+                states('input_number.sem_battery_solar_kwh') | float(0)
+                -
+                states('input_number.sem_battery_grid_kwh') | float(0)
+              ) | round(2)
+            }}
+
+      # --- KALIBRERA ENDAST OM SKILLNADEN ÄR MINST 0,20 kWh ---
+      - condition: template
+        value_template: >
+          {{
+            (
+              state_attr(
+                'sensor.sem_battery_charge_energy_1a_2',
+                'battery_capacity'
+              ) | float(0)
+              -
+              states('input_number.sem_battery_solar_kwh') | float(0)
+              -
+              states('input_number.sem_battery_grid_kwh') | float(0)
+            ) | abs >= 0.20
+          }}
+
+      # --- JUSTERA SOLARANDELEN ---
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_battery_solar_kwh
+        data:
+          value: >
+            {% set solar = states('input_number.sem_battery_solar_calibration') | float(0) %}
+            {% set grid = states('input_number.sem_battery_grid_calibration') | float(0) %}
+            {% set actual = states('input_number.sem_battery_calibration_actual') | float(0) %}
+            {% set total = solar + grid %}
+            {% if total > 0 %}
+              {{ (actual * solar / total) | round(2) }}
+            {% else %}
+              0
+            {% endif %}
+
+      # --- JUSTERA GRIDANDELEN ---
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_battery_grid_kwh
+        data:
+          value: >
+            {% set solar = states('input_number.sem_battery_solar_calibration') | float(0) %}
+            {% set grid = states('input_number.sem_battery_grid_calibration') | float(0) %}
+            {% set actual = states('input_number.sem_battery_calibration_actual') | float(0) %}
+            {% set total = solar + grid %}
+            {% if total > 0 %}
+              {{ (actual * grid / total) | round(2) }}
+            {% else %}
+              0
+            {% endif %}
+################################################################################
+# STORE CHARGE WINDOW TIMES IN INPUT_DATETIME ENTITIES - DAY
+  - alias: SEM - Update charge window times 1a
+    mode: restart
+    triggers:
+      - trigger: time
+        at: "06:00:00"
+    conditions:
+      - condition: template
+        value_template: >
+          {% set window = states('sensor.sem_battery_charge_window_cheapest_1a') %}
+          {% if ' - ' in window %}
+            {% set parts = window.split(' - ') %}
+            {{ as_datetime(parts[0], none) != none
+              and as_datetime(parts[1], none) != none
+              and as_datetime(parts[1]) > as_datetime(parts[0]) }}
+          {% else %}
+            false
+          {% endif %}
+    actions:
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.sem_battery_window_1a_start
+        data:
+          datetime: >
+            {{ as_datetime(
+              states('sensor.sem_battery_charge_window_cheapest_1a').split(' - ')[0]
+            ).strftime('%Y-%m-%d %H:%M:%S') }}
+
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.sem_battery_window_1a_stop
+        data:
+          datetime: >
+            {{ as_datetime(
+              states('sensor.sem_battery_charge_window_cheapest_1a').split(' - ')[1]
+            ).strftime('%Y-%m-%d %H:%M:%S') }}
+
+# STORE CHARGE WINDOW TIMES IN INPUT_DATETIME ENTITIES - NIGHT
+  - alias: SEM - Update charge window times 2
+    mode: restart
+    triggers:
+      - trigger: time
+        at: "18:00:00"
+    conditions:
+      - condition: template
+        value_template: >
+          {% set window = states('sensor.sem_battery_charge_window_cheapest_2') %}
+          {% if ' - ' in window %}
+            {% set parts = window.split(' - ') %}
+            {{ as_datetime(parts[0], none) != none
+              and as_datetime(parts[1], none) != none
+              and as_datetime(parts[1]) > as_datetime(parts[0]) }}
+          {% else %}
+            false
+          {% endif %}
+    actions:
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.sem_battery_window_2_start
+        data:
+          datetime: >
+            {{ as_datetime(
+              states('sensor.sem_battery_charge_window_cheapest_2').split(' - ')[0]
+            ).strftime('%Y-%m-%d %H:%M:%S') }}
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.sem_battery_window_2_stop
+        data:
+          datetime: >
+            {{ as_datetime(
+              states('sensor.sem_battery_charge_window_cheapest_2').split(' - ')[1]
+            ).strftime('%Y-%m-%d %H:%M:%S') }}
+
+#STORE START VALUES FOR CHARGE WINDOW 1a
+  - alias: SEM - Store start values window 1a
+    mode: single
+    triggers:
+      - trigger: time
+        at: input_datetime.sem_battery_window_1a_start
+    actions:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_battery_price_window_1
+        data:
+          value: >
+            {{ state_attr('sensor.sem_battery_charge_energy_1a_2', 'avg_window') | float(0) }}
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.grid_charge_start_1a
+        data:
+          value: >
+            {{ states('sensor.sem_battery_charge_from_grid_energy') | float(0) }}
+
+# STORE stop values for charge window 1a
+  - alias: SEM - Store end values window 1a
+    mode: single
+    triggers:
+      - trigger: time
+        at: input_datetime.sem_battery_window_1a_stop
+    actions:
+      - delay: "00:15:00"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.grid_charge_stop_1a
+        data:
+          value: >
+            {{ states('sensor.sem_battery_charge_from_grid_energy') | float(0) }}
+
+################################################################################
+  - alias: SEM - Store start values window 2
+    mode: single
+    triggers:
+      - trigger: time
+        at: input_datetime.sem_battery_window_2_start
+    actions:
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.sem_battery_price_window_2
+        data:
+          value: >
+            {{ state_attr('sensor.sem_battery_charge_energy_2_1b', 'avg_window') | float(0) }}
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.grid_charge_start_2
+        data:
+          value: >
+            {{ states('sensor.sem_battery_charge_from_grid_energy') | float(0) }}
+
+
+  - alias: SEM - Store end values window 2
+    mode: single
+    triggers:
+      - trigger: time
+        at: input_datetime.sem_battery_window_2_stop
+    actions:
+      - delay: "00:15:00"
+      - action: input_number.set_value
+        target:
+          entity_id: input_number.grid_charge_stop_2
+        data:
+          value: >
+            {{ states('sensor.sem_battery_charge_from_grid_energy') | float(0) }}
+
+
+
+#############################WALLBOX AND EV###################################################
+  # Store start and end time for EV charge based on sensor value
+  - alias: SEM - Store start and end time EV charge
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: sensor.sem_ev_charge_time
+    conditions:
+      - condition: template
+        value_template: >
+          {{ states('sensor.sem_ev_charge_time') not in ['unknown', 'unavailable', ''] }}
+    actions:
+      - delay: "00:00:03"
+      - action: input_datetime.set_datetime
+        data:
+          entity_id: input_datetime.sem_ev_charge_start
+          date: >
+            {% set times = states('sensor.sem_ev_charge_time').split(' - ') %}
+            {{ times[0][:10] }}
+          time: >
+            {% set times = states('sensor.sem_ev_charge_time').split(' - ') %}
+            {{ times[0][11:19] }}
+      - action: input_datetime.set_datetime
+        data:
+          entity_id: input_datetime.sem_ev_charge_end
+          date: >
+            {% set times = states('sensor.sem_ev_charge_time').split(' - ') %}
+            {{ times[1][:10] }}
+          time: >
+            {% set times = states('sensor.sem_ev_charge_time').split(' - ') %}
+            {{ times[1][11:19] }}
+
+  # Plan EV charge now
+  - alias: SEM - Start EV charge now
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: input_button.sem_ev_charge_now    conditions:
+      - condition: template
+        value_template: >
+          {% set user_code = states('input_text.sem_user_access_code') | trim %}
+          {% set codes_raw = states('sensor.sem_sys_state') %}
+          {% if user_code != '' and codes_raw %}
+            {% set codes_list = codes_raw.split(',') | map('trim') | list %}
+            {{ user_code in codes_list }}
+          {% else %}
+            false
+          {% endif %}
+      - condition: state
+        entity_id: input_boolean.sem_ev_charge_active
+        state: "on"
+      - condition: template
+        value_template: >
+          {{ states('input_number.sem_ev_charge_hours') | float(0) >= 0.25 }}
+    actions:
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.sem_ev_charge_start
+        data:
+          datetime: >
+            {{ (now() + timedelta(minutes=1)).strftime('%Y-%m-%d %H:%M:%S') }}
+      - action: input_datetime.set_datetime
+        target:
+          entity_id: input_datetime.sem_ev_charge_end
+        data:
+          datetime: >
+            {{ (now() + timedelta(minutes=1) + timedelta(hours=states('input_number.sem_ev_charge_hours') | float(0))).strftime('%Y-%m-%d %H:%M:%S') }}
+
+
+  ###### WALLABOX AND MANUAL WALLBOX ######
+
+  # Start wallbox when charge window has started and charger is ready to charge  
+  - alias: SEM - Start wallbox
+    mode: single
+    triggers:
+      - trigger: template
+        value_template: >
+          {% set window = states('sensor.sem_ev_charge_window_apex') %}
+          {% if window not in ['unknown', 'unavailable', ''] and ' - ' in window %}
+            {% set start = window.split(' - ')[0] | as_datetime | as_local %}
+            {{ now() >= start and now() < start + timedelta(minutes=1) }}
+          {% else %}
+            false
+          {% endif %}
+      - trigger: state
+        entity_id: binary_sensor.sem_ev_charger_1_ready_to_charge
+        from: "off"
+        to: "on"
+      - trigger: state
+        entity_id: binary_sensor.sem_ev_charger_2_ready_to_charge
+        from: "off"
+        to: "on"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sem_smart_charge_ev
+        state: "on"
+      - condition: template
+        value_template: >
+          {% set user_code = states('input_text.sem_user_access_code') | trim %}
+          {% set codes_raw = states('sensor.sem_sys_state') %}
+          {% if user_code != '' and codes_raw %}
+            {% set codes_list = codes_raw.split(',') | map('trim') | list %}
+            {{ user_code in codes_list }}
+          {% else %}
+            false
+          {% endif %}
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_select.sem_ev_charger_1
+            state: "Pulsar Max"
+          - condition: state
+            entity_id: input_select.sem_ev_charger_2
+            state: "Pulsar Max"
+          - condition: state
+            entity_id: input_select.sem_ev_charger_1
+            state: "Annan laddbox"
+          - condition: state
+            entity_id: input_select.sem_ev_charger_2
+            state: "Annan laddbox"
+    actions:
+      - delay:
+          seconds: 10
+      - condition: template
+        value_template: >
+          {% set window = states('sensor.sem_ev_charge_window_apex') %}
+          {% if window not in ['unknown', 'unavailable', ''] and ' - ' in window %}
+            {% set parts = window.split(' - ') %}
+            {% set start = parts[0] | as_datetime | as_local %}
+            {% set end = parts[1] | as_datetime | as_local %}
+            {{ start <= now() <= end }}
+          {% else %}
+            false
+          {% endif %}
+      - if:
+          - condition: state
+            entity_id: binary_sensor.sem_ev_charger_1_ready_to_charge
+            state: "on"
+        then:
+          - action: >
+              {% set entity = states('input_text.sem_ev_charger_1_start') %}
+              {% set domain = entity.split('.')[0] %}
+              {% if domain == 'button' %}
+                button.press
+              {% elif domain == 'switch' %}
+                switch.turn_on
+              {% elif domain == 'input_boolean' %}
+                input_boolean.turn_on
+              {% elif domain == 'lock' %}
+                lock.unlock
+              {% endif %}
+            target:
+              entity_id: >
+                {{ states('input_text.sem_ev_charger_1_start') }}
+      - if:
+          - condition: state
+            entity_id: input_boolean.sem_ev_wallbox_multi
+            state: "on"
+          - condition: state
+            entity_id: binary_sensor.sem_ev_charger_2_ready_to_charge
+            state: "on"
+        then:
+          - action: >
+              {% set entity = states('input_text.sem_ev_charger_2_start') %}
+              {% set domain = entity.split('.')[0] %}
+              {% if domain == 'button' %}
+                button.press
+              {% elif domain == 'switch' %}
+                switch.turn_on
+              {% elif domain == 'input_boolean' %}
+                input_boolean.turn_on
+              {% elif domain == 'lock' %}
+                lock.unlock
+              {% endif %}
+            target:
+              entity_id: >
+                {{ states('input_text.sem_ev_charger_2_start') }}
+
+  # Stop wallbox when charge window has ended or manual stop button is pressed
+  - alias: SEM - Stop wallbox
+    mode: single
+    triggers:
+      - trigger: template
+        id: window_ended
+        value_template: >
+          {% set window = states('sensor.sem_ev_charge_window_apex') %}
+          {% if window not in ['unknown', 'unavailable', ''] and ' - ' in window %}
+            {% set end = window.split(' - ')[1] | as_datetime | as_local %}
+            {{ now() >= end and now() < end + timedelta(minutes=1) }}
+          {% else %}
+            false
+          {% endif %}
+      - trigger: state
+        entity_id: input_button.sem_ev_charge_stop_1
+        id: charger_1
+      - trigger: state
+        entity_id: input_button.sem_ev_charge_stop_2
+        id: charger_2
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sem_smart_charge_ev
+        state: "on"
+      - condition: template
+        value_template: >
+          {% set user_code = states('input_text.sem_user_access_code') | trim %}
+          {% set codes_raw = states('sensor.sem_sys_state') %}
+          {% if user_code != '' and codes_raw %}
+            {% set codes_list = codes_raw.split(',') | map('trim') | list %}
+            {{ user_code in codes_list }}
+          {% else %}
+            false
+          {% endif %}
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_select.sem_ev_charger_1
+            state: "Pulsar Max"
+          - condition: state
+            entity_id: input_select.sem_ev_charger_1
+            state: "Annan laddbox"
+          - condition: state
+            entity_id: input_select.sem_ev_charger_2
+            state: "Pulsar Max"
+          - condition: state
+            entity_id: input_select.sem_ev_charger_2
+            state: "Annan laddbox"
+    actions:
+      - choose:
+          # ==================================================
+          # AUTOMATISKT STOPP: LADDFÖNSTRET HAR LÖPT UT
+          # ==================================================
+          - conditions:
+              - condition: trigger
+                id: window_ended
+            sequence:
+              - if:
+                  - condition: or
+                    conditions:
+                      - condition: state
+                        entity_id: input_select.sem_ev_charger_1
+                        state: "Pulsar Max"
+                      - condition: state
+                        entity_id: input_select.sem_ev_charger_1
+                        state: "Annan laddbox"
+                then:
+                  - action: >
+                      {% set entity = states('input_text.sem_ev_charger_1_stop') %}
+                      {% set domain = entity.split('.')[0] %}
+                      {% if domain == 'button' %}
+                        button.press
+                      {% elif domain == 'switch' %}
+                        switch.turn_off
+                      {% elif domain == 'input_boolean' %}
+                        input_boolean.turn_off
+                      {% elif domain == 'lock' %}
+                        lock.lock
+                      {% endif %}
+                    target:
+                      entity_id: >
+                        {{ states('input_text.sem_ev_charger_1_stop') }}
+                  - delay: "00:00:10"
+                  - action: >
+                      {% set entity = states('input_text.sem_ev_charger_1_start') %}
+                      {% set domain = entity.split('.')[0] %}
+                      {% if domain == 'button' %}
+                        button.press
+                      {% elif domain == 'switch' %}
+                        switch.turn_off
+                      {% elif domain == 'input_boolean' %}
+                        input_boolean.turn_off
+                      {% elif domain == 'lock' %}
+                        lock.lock
+                      {% endif %}
+                    target:
+                      entity_id: >
+                        {{ states('input_text.sem_ev_charger_1_start') }}
+              - if:
+                  - condition: state
+                    entity_id: input_boolean.sem_ev_wallbox_multi
+                    state: "on"
+                  - condition: or
+                    conditions:
+                      - condition: state
+                        entity_id: input_select.sem_ev_charger_2
+                        state: "Pulsar Max"
+                      - condition: state
+                        entity_id: input_select.sem_ev_charger_2
+                        state: "Annan laddbox"
+                then:
+                  - action: >
+                      {% set entity = states('input_text.sem_ev_charger_2_stop') %}
+                      {% set domain = entity.split('.')[0] %}
+                      {% if domain == 'button' %}
+                        button.press
+                      {% elif domain == 'switch' %}
+                        switch.turn_off
+                      {% elif domain == 'input_boolean' %}
+                        input_boolean.turn_off
+                      {% elif domain == 'lock' %}
+                        lock.lock
+                      {% endif %}
+                    target:
+                      entity_id: >
+                        {{ states('input_text.sem_ev_charger_2_stop') }}
+                  - delay: "00:00:10"
+                  - action: >
+                      {% set entity = states('input_text.sem_ev_charger_2_start') %}
+                      {% set domain = entity.split('.')[0] %}
+                      {% if domain == 'button' %}
+                        button.press
+                      {% elif domain == 'switch' %}
+                        switch.turn_off
+                      {% elif domain == 'input_boolean' %}
+                        input_boolean.turn_off
+                      {% elif domain == 'lock' %}
+                        lock.lock
+                      {% endif %}
+                    target:
+                      entity_id: >
+                        {{ states('input_text.sem_ev_charger_2_start') }}
+          # ==================================================
+          # MANUELLT STOPP: LADDBOX 1
+          # ==================================================
+          - conditions:
+              - condition: trigger
+                id: charger_1
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity_id: input_select.sem_ev_charger_1
+                    state: "Pulsar Max"
+                  - condition: state
+                    entity_id: input_select.sem_ev_charger_1
+                    state: "Annan laddbox"
+            sequence:
+              - action: >
+                  {% set entity = states('input_text.sem_ev_charger_1_stop') %}
+                  {% set domain = entity.split('.')[0] %}
+                  {% if domain == 'button' %}
+                    button.press
+                  {% elif domain == 'switch' %}
+                    switch.turn_off
+                  {% elif domain == 'input_boolean' %}
+                    input_boolean.turn_off
+                  {% elif domain == 'lock' %}
+                    lock.lock
+                  {% endif %}
+                target:
+                  entity_id: >
+                    {{ states('input_text.sem_ev_charger_1_stop') }}
+              - delay: "00:00:10"
+              - action: >
+                  {% set entity = states('input_text.sem_ev_charger_1_start') %}
+                  {% set domain = entity.split('.')[0] %}
+                  {% if domain == 'button' %}
+                    button.press
+                  {% elif domain == 'switch' %}
+                    switch.turn_off
+                  {% elif domain == 'input_boolean' %}
+                    input_boolean.turn_off
+                  {% elif domain == 'lock' %}
+                    lock.lock
+                  {% endif %}
+                target:
+                  entity_id: >
+                    {{ states('input_text.sem_ev_charger_1_start') }}
+      
+          # ==================================================
+          # MANUELLT STOPP: LADDBOX 2
+          # ==================================================
+          - conditions:
+              - condition: trigger
+                id: charger_2
+              - condition: or
+                conditions:
+                  - condition: state
+                    entity_id: input_select.sem_ev_charger_2
+                    state: "Pulsar Max"
+                  - condition: state
+                    entity_id: input_select.sem_ev_charger_2
+                    state: "Annan laddbox"
+            sequence:
+              - action: >
+                  {% set entity = states('input_text.sem_ev_charger_2_stop') %}
+                  {% set domain = entity.split('.')[0] %}
+                  {% if domain == 'button' %}
+                    button.press
+                  {% elif domain == 'switch' %}
+                    switch.turn_off
+                  {% elif domain == 'input_boolean' %}
+                    input_boolean.turn_off
+                  {% elif domain == 'lock' %}
+                    lock.lock
+                  {% endif %}
+                target:
+                  entity_id: >
+                    {{ states('input_text.sem_ev_charger_2_stop') }}
+              - delay: "00:00:10"
+              - action: >
+                  {% set entity = states('input_text.sem_ev_charger_2_start') %}
+                  {% set domain = entity.split('.')[0] %}
+                  {% if domain == 'button' %}
+                    button.press
+                  {% elif domain == 'switch' %}
+                    switch.turn_off
+                  {% elif domain == 'input_boolean' %}
+                    input_boolean.turn_off
+                  {% elif domain == 'lock' %}
+                    lock.lock
+                  {% endif %}
+                target:
+                  entity_id: >
+                    {{ states('input_text.sem_ev_charger_2_start') }}
+
+
+#############################EASEE###################################################
+  - alias: SEM - Konfigurera Easee
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_button.sem_ev_easee_configure
+    actions:
+      # Easee Wallbox 1
+      - if:
+          - condition: state
+            entity_id: input_select.sem_ev_charger_1
+            state: "Easee"
+          - condition: template
+            value_template: >
+              {{ states('input_text.sem_ev_easee_id') | trim != '' }}
+        then:
+          - action: easee.set_circuit_dynamic_limit
+            data:
+              current_p1: 0
+              current_p2: 0
+              current_p3: 0
+              time_to_live: 0
+              device_id: >
+                {{ states('input_text.sem_ev_easee_id') | trim }}
+      # Easee Wallbox 2
+      - if:
+          - condition: state
+            entity_id: input_boolean.sem_ev_wallbox_multi
+            state: "on"
+          - condition: state
+            entity_id: input_select.sem_ev_charger_2
+            state: "Easee"
+          - condition: template
+            value_template: >
+              {{ states('input_text.sem_ev_easee_id_2') | trim != '' }}
+        then:
+          - action: easee.set_circuit_dynamic_limit
+            data:
+              current_p1: 0
+              current_p2: 0
+              current_p3: 0
+              time_to_live: 0
+              device_id: >
+                {{ states('input_text.sem_ev_easee_id_2') | trim }}
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.sem_ev_easee_confirmation
+        data:
+          value: "Easee-konfiguration genomförd"
+
+
+  - alias: SEM - Start Easee wallbox
+    mode: single
+    triggers:
+      - trigger: template
+        value_template: >
+          {% set window = states('sensor.sem_ev_charge_window_apex') %}
+          {% if window not in ['unknown', 'unavailable', ''] and ' - ' in window %}
+            {% set start = window.split(' - ')[0] | as_datetime | as_local %}
+            {{ now() >= start and now() < start + timedelta(minutes=1) }}
+          {% else %}
+            false
+          {% endif %}
+      - trigger: state
+        entity_id: binary_sensor.sem_ev_charger_1_ready_to_charge
+        from: "off"
+        to: "on"
+      - trigger: state
+        entity_id: binary_sensor.sem_ev_charger_2_ready_to_charge
+        from: "off"
+        to: "on"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sem_smart_charge_ev
+        state: "on"
+      - condition: template
+        value_template: >
+          {% set user_code = states('input_text.sem_user_access_code') | trim %}
+          {% set codes_raw = states('sensor.sem_sys_state') %}
+          {% if user_code != '' and codes_raw %}
+            {% set codes_list = codes_raw.split(',') | map('trim') | list %}
+            {{ user_code in codes_list }}
+          {% else %}
+            false
+          {% endif %}
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_select.sem_ev_charger_1
+            state: "Easee"
+          - condition: state
+            entity_id: input_select.sem_ev_charger_2
+            state: "Easee"
+    actions:
+      - delay:
+          seconds: 10
+      - condition: template
+        value_template: >
+          {% set window = states('sensor.sem_ev_charge_window_apex') %}
+          {% if window not in ['unknown', 'unavailable', ''] and ' - ' in window %}
+            {% set parts = window.split(' - ') %}
+            {% set start = parts[0] | as_datetime | as_local %}
+            {% set end = parts[1] | as_datetime | as_local %}
+            {{ start <= now() <= end }}
+          {% else %}
+            false
+          {% endif %}
+      # Easee Wallbox 1
+      - if:
+          - condition: state
+            entity_id: input_select.sem_ev_charger_1
+            state: "Easee"
+          - condition: state
+            entity_id: binary_sensor.sem_ev_charger_1_ready_to_charge
+            state: "on"
+        then:
+          - action: easee.set_circuit_dynamic_limit
+            data:
+              current_p1: >
+                {{ states('input_number.sem_ev_easee_max_current') | int }}
+              current_p2: >
+                {{ states('input_number.sem_ev_easee_max_current') | int }}
+              current_p3: >
+                {{ states('input_number.sem_ev_easee_max_current') | int }}
+              time_to_live: 0
+              device_id: >
+                {{ states('input_text.sem_ev_easee_id') | trim }}
+      # Easee Wallbox 2
+      - if:
+          - condition: state
+            entity_id: input_boolean.sem_ev_wallbox_multi
+            state: "on"
+          - condition: state
+            entity_id: input_select.sem_ev_charger_2
+            state: "Easee"
+          - condition: state
+            entity_id: binary_sensor.sem_ev_charger_2_ready_to_charge
+            state: "on"
+        then:
+          - action: easee.set_circuit_dynamic_limit
+            data:
+              current_p1: >
+                {{ states('input_number.sem_ev_easee_max_current') | int }}
+              current_p2: >
+                {{ states('input_number.sem_ev_easee_max_current') | int }}
+              current_p3: >
+                {{ states('input_number.sem_ev_easee_max_current') | int }}
+              time_to_live: 0
+              device_id: >
+                {{ states('input_text.sem_ev_easee_id_2') | trim }}
+
+
+  - alias: SEM - Stop Easee
+    mode: single
+    triggers:
+      - trigger: template
+        id: window_ended
+        value_template: >
+          {% set window = states('sensor.sem_ev_charge_window_apex') %}
+          {% if window not in ['unknown', 'unavailable', ''] and ' - ' in window %}
+            {% set end = window.split(' - ')[1] | as_datetime | as_local %}
+            {{ now() >= end and now() < end + timedelta(minutes=1) }}
+          {% else %}
+            false
+          {% endif %}
+      - trigger: state
+        entity_id: input_button.sem_ev_charge_stop_1
+        id: charger_1
+      - trigger: state
+        entity_id: input_button.sem_ev_charge_stop_2
+        id: charger_2
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sem_smart_charge_ev
+        state: "on"
+      - condition: template
+        value_template: >
+          {% set user_code = states('input_text.sem_user_access_code') | trim %}
+          {% set codes_raw = states('sensor.sem_sys_state') %}
+          {% if user_code != '' and codes_raw %}
+            {% set codes_list = codes_raw.split(',') | map('trim') | list %}
+            {{ user_code in codes_list }}
+          {% else %}
+            false
+          {% endif %}
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_select.sem_ev_charger_1
+            state: "Easee"
+          - condition: state
+            entity_id: input_select.sem_ev_charger_2
+            state: "Easee"
+    actions:
+      - choose:
+          # ==================================================
+          # AUTOMATISKT STOPP: LADDFÖNSTRET HAR LÖPT UT
+          # ==================================================
+          - conditions:
+              - condition: trigger
+                id: window_ended
+            sequence:
+              # Easee laddbox 1
+              - if:
+                  - condition: state
+                    entity_id: input_select.sem_ev_charger_1
+                    state: "Easee"
+                then:
+                  - action: easee.set_circuit_dynamic_limit
+                    data:
+                      current_p1: 0
+                      current_p2: 0
+                      current_p3: 0
+                      time_to_live: 0
+                      device_id: >
+                        {{ states('input_text.sem_ev_easee_id') | trim }}
+              # Easee laddbox 2
+              - if:
+                  - condition: state
+                    entity_id: input_boolean.sem_ev_wallbox_multi
+                    state: "on"
+                  - condition: state
+                    entity_id: input_select.sem_ev_charger_2
+                    state: "Easee"
+                then:
+                  - action: easee.set_circuit_dynamic_limit
+                    data:
+                      current_p1: 0
+                      current_p2: 0
+                      current_p3: 0
+                      time_to_live: 0
+                      device_id: >
+                        {{ states('input_text.sem_ev_easee_id_2') | trim }}
+          # ==================================================
+          # MANUELLT STOPP: LADDBOX 1
+          # ==================================================
+          - conditions:
+              - condition: trigger
+                id: charger_1
+              - condition: state
+                entity_id: input_select.sem_ev_charger_1
+                state: "Easee"
+            sequence:
+              - action: easee.set_circuit_dynamic_limit
+                data:
+                  current_p1: 0
+                  current_p2: 0
+                  current_p3: 0
+                  time_to_live: 0
+                  device_id: >
+                    {{ states('input_text.sem_ev_easee_id') | trim }}
+          # ==================================================
+          # MANUELLT STOPP: LADDBOX 2
+          # ==================================================
+          - conditions:
+              - condition: trigger
+                id: charger_2
+              - condition: state
+                entity_id: input_boolean.sem_ev_wallbox_multi
+                state: "on"
+              - condition: state
+                entity_id: input_select.sem_ev_charger_2
+                state: "Easee"
+            sequence:
+              - action: easee.set_circuit_dynamic_limit
+                data:
+                  current_p1: 0
+                  current_p2: 0
+                  current_p3: 0
+                  time_to_live: 0
+                  device_id: >
+                    {{ states('input_text.sem_ev_easee_id_2') | trim }}
+
+#############################EASEE END###################################################
+
+#############################ZAPTEC###################################################
+  - alias: SEM - Zaptec Charging Completed
+    id: sem_zaptec_charging_completed
+    mode: queued
+    triggers:
+      - trigger: event
+        event_type: state_changed
+    conditions:
+      - condition: state
+        entity_id: input_select.sem_ev_charger_1
+        state: "Zaptec"
+      - condition: template
+        value_template: >
+          {% set sensor = states('input_text.sem_ev_charger_1_status_sensor') | trim %}
+          {{
+            sensor not in ['', 'unknown', 'unavailable']
+            and trigger.event.data.get('entity_id') == sensor
+          }}
+    actions:
+      - choose:
+          # LADDNINGEN HAR SLUTFÖRTS
+          - conditions:
+              - condition: template
+                value_template: >
+                  {% set old = trigger.event.data.get('old_state') %}
+                  {% set new = trigger.event.data.get('new_state') %}
+                  {{
+                    old is not none
+                    and new is not none
+                    and old.state == 'connected_charging'
+                    and new.state == 'connected_finished'
+                  }}
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.sem_ev_charger_1_charging_completed
+          # KABELN HAR DRAGITS UR
+          - conditions:
+              - condition: template
+                value_template: >
+                  {% set new = trigger.event.data.get('new_state') %}
+                  {{
+                    new is not none
+                    and new.state == 'disconnected'
+                  }}
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.sem_ev_charger_1_charging_completed
+
+  - alias: SEM - Zaptec Charging Completed 2
+    id: sem_zaptec_charging_completed_2
+    mode: queued
+    triggers:
+      - trigger: event
+        event_type: state_changed
+    conditions:
+      - condition: state
+        entity_id: input_select.sem_ev_charger_2
+        state: "Zaptec"
+      - condition: template
+        value_template: >
+          {% set sensor = states('input_text.sem_ev_charger_2_status_sensor') | trim %}
+          {{
+            sensor not in ['', 'unknown', 'unavailable']
+            and trigger.event.data.get('entity_id') == sensor
+          }}
+    actions:
+      - choose:
+          # LADDNINGEN HAR SLUTFÖRTS
+          - conditions:
+              - condition: template
+                value_template: >
+                  {% set old = trigger.event.data.get('old_state') %}
+                  {% set new = trigger.event.data.get('new_state') %}
+                  {{
+                    old is not none
+                    and new is not none
+                    and old.state == 'connected_charging'
+                    and new.state == 'connected_finished'
+                  }}
+            sequence:
+              - action: input_boolean.turn_on
+                target:
+                  entity_id: input_boolean.sem_ev_charger_2_charging_completed
+          # KABELN HAR DRAGITS UR
+          - conditions:
+              - condition: template
+                value_template: >
+                  {% set new = trigger.event.data.get('new_state') %}
+                  {{
+                    new is not none
+                    and new.state == 'disconnected'
+                  }}
+            sequence:
+              - action: input_boolean.turn_off
+                target:
+                  entity_id: input_boolean.sem_ev_charger_2_charging_completed
+
+  - alias: SEM - Konfigurera Zaptec
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: input_button.sem_ev_zaptec_configure
+    actions:
+      # Zaptec laddare 1
+      - if:
+          - condition: state
+            entity_id: input_select.sem_ev_charger_1
+            state: "Zaptec"
+          - condition: template
+            value_template: >
+              {{ states('input_text.sem_ev_zaptec_current_entity') | trim != '' }}
+        then:
+          - action: number.set_value
+            target:
+              entity_id: >
+                {{ states('input_text.sem_ev_zaptec_current_entity') | trim }}
+            data:
+              value: 0
+      # Zaptec laddare 2
+      - if:
+          - condition: state
+            entity_id: input_boolean.sem_ev_wallbox_multi
+            state: "on"
+          - condition: state
+            entity_id: input_select.sem_ev_charger_2
+            state: "Zaptec"
+          - condition: template
+            value_template: >
+              {{ states('input_text.sem_ev_zaptec_current_entity_2') | trim != '' }}
+        then:
+          - action: number.set_value
+            target:
+              entity_id: >
+                {{ states('input_text.sem_ev_zaptec_current_entity_2') | trim }}
+            data:
+              value: 0
+      # Bekräfta konfigurationen
+      - action: input_text.set_value
+        target:
+          entity_id: input_text.sem_ev_zaptec_confirmation
+        data:
+          value: "Zaptec-konfiguration genomförd"
+
+  - alias: SEM - Start Zaptec
+    mode: single
+    triggers:
+      - trigger: template
+        value_template: >
+          {% set window = states('sensor.sem_ev_charge_window_apex') %}
+          {% if window not in ['unknown', 'unavailable', ''] and ' - ' in window %}
+            {% set start = window.split(' - ')[0] | as_datetime | as_local %}
+            {{ now() >= start and now() < start + timedelta(minutes=1) }}
+          {% else %}
+            false
+          {% endif %}
+      - trigger: state
+        entity_id: binary_sensor.sem_ev_charger_1_ready_to_charge
+        from: "off"
+        to: "on"
+      - trigger: state
+        entity_id: binary_sensor.sem_ev_charger_2_ready_to_charge
+        from: "off"
+        to: "on"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sem_smart_charge_ev
+        state: "on"
+      - condition: template
+        value_template: >
+          {% set user_code = states('input_text.sem_user_access_code') | trim %}
+          {% set codes_raw = states('sensor.sem_sys_state') %}
+          {% if user_code != '' and codes_raw %}
+            {% set codes_list = codes_raw.split(',') | map('trim') | list %}
+            {{ user_code in codes_list }}
+          {% else %}
+            false
+          {% endif %}
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_select.sem_ev_charger_1
+            state: "Zaptec"
+          - condition: state
+            entity_id: input_select.sem_ev_charger_2
+            state: "Zaptec"
+    actions:
+      - delay:
+          seconds: 10
+      - condition: template
+        value_template: >
+          {% set window = states('sensor.sem_ev_charge_window_apex') %}
+          {% if window not in ['unknown', 'unavailable', ''] and ' - ' in window %}
+            {% set parts = window.split(' - ') %}
+            {% set start = parts[0] | as_datetime | as_local %}
+            {% set end = parts[1] | as_datetime | as_local %}
+            {{ start <= now() <= end }}
+          {% else %}
+            false
+          {% endif %}
+      # Zaptec laddare 1
+      - if:
+          - condition: state
+            entity_id: input_select.sem_ev_charger_1
+            state: "Zaptec"
+          - condition: state
+            entity_id: binary_sensor.sem_ev_charger_1_ready_to_charge
+            state: "on"
+          - condition: template
+            value_template: >
+              {{ states('input_text.sem_ev_zaptec_current_entity') | trim != '' }}
+        then:
+          - action: number.set_value
+            target:
+              entity_id: >
+                {{ states('input_text.sem_ev_zaptec_current_entity') | trim }}
+            data:
+              value: >
+                {{ states('input_number.sem_ev_zaptec_max_current') | int }}
+      # Zaptec laddare 2
+      - if:
+          - condition: state
+            entity_id: input_boolean.sem_ev_wallbox_multi
+            state: "on"
+          - condition: state
+            entity_id: input_select.sem_ev_charger_2
+            state: "Zaptec"
+          - condition: state
+            entity_id: binary_sensor.sem_ev_charger_2_ready_to_charge
+            state: "on"
+          - condition: template
+            value_template: >
+              {{ states('input_text.sem_ev_zaptec_current_entity_2') | trim != '' }}
+        then:
+          - action: number.set_value
+            target:
+              entity_id: >
+                {{ states('input_text.sem_ev_zaptec_current_entity_2') | trim }}
+            data:
+              value: >
+                {{ states('input_number.sem_ev_zaptec_max_current_2') | int }}
+
+
+  - alias: SEM - Stop Zaptec
+    mode: single
+    triggers:
+      - trigger: template
+        id: window_ended
+        value_template: >
+          {% set window = states('sensor.sem_ev_charge_window_apex') %}
+          {% if window not in ['unknown', 'unavailable', ''] and ' - ' in window %}
+            {% set end = window.split(' - ')[1] | as_datetime | as_local %}
+            {{ now() >= end and now() < end + timedelta(minutes=1) }}
+          {% else %}
+            false
+          {% endif %}
+      - trigger: state
+        entity_id: input_button.sem_ev_charge_stop_1
+        id: charger_1
+      - trigger: state
+        entity_id: input_button.sem_ev_charge_stop_2
+        id: charger_2
+    conditions:
+      - condition: state
+        entity_id: input_boolean.sem_smart_charge_ev
+        state: "on"
+      - condition: template
+        value_template: >
+          {% set user_code = states('input_text.sem_user_access_code') | trim %}
+          {% set codes_raw = states('sensor.sem_sys_state') %}
+          {% if user_code != '' and codes_raw %}
+            {% set codes_list = codes_raw.split(',') | map('trim') | list %}
+            {{ user_code in codes_list }}
+          {% else %}
+            false
+          {% endif %}
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_select.sem_ev_charger_1
+            state: "Zaptec"
+          - condition: state
+            entity_id: input_select.sem_ev_charger_2
+            state: "Zaptec"
+    actions:
+      - choose:
+          # ==================================================
+          # AUTOMATISKT STOPP: LADDFÖNSTRET HAR LÖPT UT
+          # ==================================================
+          - conditions:
+              - condition: trigger
+                id: window_ended
+            sequence:
+              # Zaptec laddbox 1
+              - if:
+                  - condition: state
+                    entity_id: input_select.sem_ev_charger_1
+                    state: "Zaptec"
+                then:
+                  # Stoppa laddningen
+                  - if:
+                      - condition: template
+                        value_template: >
+                          {{ states('input_text.sem_ev_zaptec_stop_entity') | trim != '' }}
+                    then:
+                      - action: button.press
+                        target:
+                          entity_id: >
+                            {{ states('input_text.sem_ev_zaptec_stop_entity') | trim }}
+                  - if:
+                      - condition: template
+                        value_template: >
+                          {{ states('input_text.sem_ev_zaptec_current_entity') | trim != '' }}
+                    then:
+                      - action: number.set_value
+                        target:
+                          entity_id: >
+                            {{ states('input_text.sem_ev_zaptec_current_entity') | trim }}
+                        data:
+                          value: 0
+              # Zaptec laddbox 2
+              - if:
+                  - condition: state
+                    entity_id: input_boolean.sem_ev_wallbox_multi
+                    state: "on"
+                  - condition: state
+                    entity_id: input_select.sem_ev_charger_2
+                    state: "Zaptec"
+                then:
+                  # Stoppa laddningen
+                  - if:
+                      - condition: template
+                        value_template: >
+                          {{ states('input_text.sem_ev_zaptec_stop_entity_2') | trim != '' }}
+                    then:
+                      - action: button.press
+                        target:
+                          entity_id: >
+                            {{ states('input_text.sem_ev_zaptec_stop_entity_2') | trim }}
+                  - if:
+                      - condition: template
+                        value_template: >
+                          {{ states('input_text.sem_ev_zaptec_current_entity_2') | trim != '' }}
+                    then:
+                      - action: number.set_value
+                        target:                          entity_id: >
+                            {{ states('input_text.sem_ev_zaptec_current_entity_2') | trim }}
+                        data:
+                          value: 0
+          # ==================================================
+          # MANUELLT STOPP: LADDBOX 1
+          # ==================================================
+          - conditions:
+              - condition: trigger
+                id: charger_1
+              - condition: state
+                entity_id: input_select.sem_ev_charger_1
+                state: "Zaptec"
+            sequence:
+              # Stoppa laddningen
+              - if:
+                  - condition: template
+                    value_template: >
+                      {{ states('input_text.sem_ev_zaptec_stop_entity') | trim != '' }}
+                then:
+                  - action: button.press
+                    target:
+                      entity_id: >
+                        {{ states('input_text.sem_ev_zaptec_stop_entity') | trim }}
+              - if:
+                  - condition: template
+                    value_template: >
+                      {{ states('input_text.sem_ev_zaptec_current_entity') | trim != '' }}
+                then:
+                  - action: number.set_value
+                    target:
+                      entity_id: >
+                        {{ states('input_text.sem_ev_zaptec_current_entity') | trim }}
+                    data:
+                      value: 0
+          # ==================================================
+          # MANUELLT STOPP: LADDBOX 2
+          # ==================================================
+          - conditions:
+              - condition: trigger
+                id: charger_2
+              - condition: state
+                entity_id: input_boolean.sem_ev_wallbox_multi
+                state: "on"
+              - condition: state
+                entity_id: input_select.sem_ev_charger_2
+                state: "Zaptec"
+            sequence:
+              # Stoppa laddningen
+              - if:
+                  - condition: template
+                    value_template: >
+                      {{ states('input_text.sem_ev_zaptec_stop_entity_2') | trim != '' }}
+                then:
+                  - action: button.press
+                    target:
+                      entity_id: >
+                        {{ states('input_text.sem_ev_zaptec_stop_entity_2') | trim }}
+              - if:
+                  - condition: template
+                    value_template: >
+                      {{ states('input_text.sem_ev_zaptec_current_entity_2') | trim != '' }}
+                then:
+                  - action: number.set_value
+                    target:
+                      entity_id: >
+                        {{ states('input_text.sem_ev_zaptec_current_entity_2') | trim }}
+                    data:
+                      value: 0
+
+#############################ZAPTEC END###################################################
+
+################################################################################
+#  - alias: Update packages from GitHub
+#    triggers:
+#      - trigger: state
+#        entity_id: input_boolean.manual_update_packages
+#        to: 'on'
+#    actions:
+#      - action: shell_command.update_packages_from_github
+#      - action: input_boolean.turn_on
+#        target:
+#          entity_id: input_boolean.sem_download
+#      - delay: "00:00:10"
+#      - action: input_boolean.turn_off
+#        target:
+#          entity_id: input_boolean.sem_download
+#      - action: input_boolean.turn_on
+#        target:
+#          entity_id: input_boolean.sem_download_finished
+#      - delay: "00:00:30"
+#      - action: input_boolean.turn_off
+#        target:
+#          entity_id: input_boolean.sem_download_finished
+#      - action: input_boolean.turn_off
+#        target:
+#          entity_id: input_boolean.manual_update_packages
+#
+################################################################################
+# - alias: AUTO Update packages from GitHub
+#   triggers:
+#      - trigger: time_pattern
+#        minutes: "/45"
+#    conditions:
+#      - condition: state
+#        entity_id: input_boolean.sem_auto_update
+#        state: "on"
+#     - condition: template
+#       value_template: >
+#          {% set latest = states('sensor.sem_github_latest_release') %}
+#          {% set installed = states('sensor.sem_version')
+#            | replace('v.', '')
+#            | replace('v', '') %}
+#
+#          {{ latest not in ['unknown', 'unavailable', 'none', ''] and
+#             installed not in ['unknown', 'unavailable', 'none', ''] and
+#             latest != installed }}
+#    actions:
+#      - action: input_boolean.turn_on
+#        target:
+#          entity_id: input_boolean.sem_update_notification
+#     - action: shell_command.update_packages_from_github
+#      - delay: "00:02:00"
+#      - action: input_button.press
+#        target:
+#          entity_id: input_button.sem_restart_ha
+#    mode: single

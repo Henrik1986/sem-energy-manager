@@ -1,0 +1,83 @@
+input_select:
+  sem_ev_battery_strategy:
+    name: Laddningsstrategi för elbil och batteri
+    options:
+      - Ladda elbil först
+      - Ladda elbil till en viss procent
+      - Dela effekt
+
+  sem_battery_charge_override_1a_2:
+    name: Battery charge override 
+    options:
+      - Auto
+      - Ladda
+      - Ladda fullt
+      - Ladda ej 
+    initial: Auto
+
+  sem_battery_charge_override_2_1b:
+    name: Battery charge override 
+    options:
+      - Auto
+      - Ladda
+      - Ladda fullt
+      - Ladda ej 
+    initial: Auto
+      
+  sem_savings: 
+    name: Savings graph
+    options: 
+      - Idag
+      - Vecka
+      - Månad
+      - År
+
+  sem_earnings: 
+    name: Earning graph
+    options: 
+      - Idag
+      - Vecka
+      - Månad
+      - År
+
+  sem_ev_charge_search_mode:
+    name: Laddningsläge
+    options:
+      - "Billigaste framtida"
+      - "Laddad senast"
+
+  sem_export_override_1:
+    name: Export override 1
+    options:
+      - Auto
+      - Exportera
+      - Exportera allt 
+      - Exportera ej
+    initial: Auto
+
+  sem_export_override_2:
+    name: Export override 2
+    options:
+      - Auto
+      - Exportera
+      - Exportera allt 
+      - Exportera ej
+    initial: Auto
+
+  sem_ev_charger_1:
+    name: EV Charger 1
+    options: 
+      - Välj laddbox
+      - Pulsar Max
+      - Easee
+      - Zaptec
+      - Annan laddbox
+
+  sem_ev_charger_2:
+    name: EV Charger 2
+    options: 
+      - Välj laddbox
+      - Pulsar Max
+      - Easee
+      - Zaptec
+      - Annan laddbox
