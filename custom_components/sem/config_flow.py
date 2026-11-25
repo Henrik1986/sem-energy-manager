@@ -28,6 +28,7 @@ MARKETPLACE_CARDS = {
 def find_missing_marketplace_cards(paths):
     return [name for name, path in paths.items() if not os.path.isdir(path)]
 
+
 class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     VERSION = 1
@@ -268,6 +269,8 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             return await self.async_step_finish()
 
         yaml_text = (
+            "HACS har installerat SEM:s YAML-paket, skript, datafiler och dashboard under /config/custom_components/sem/resources/. "
+            "Nedan aktiverar du filerna direkt från den platsen. Inga filer kopieras till /config/packages eller /config/dashboards.\n\n"
             "Steg 1 - Installera File Editor 📝\n\n"
             "- Inställningar > Appar > Installera app\n"
             "- Hitta och klicka på File Editor\n"

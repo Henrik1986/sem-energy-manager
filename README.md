@@ -43,8 +43,9 @@ I den här versionen behandlas samtliga aktiva Huawei Solar-anslutningar som en 
 
 1. Installera **Smart Energy Manager (SEM)** via HACS.
 2. Starta om Home Assistant och lägg till SEM under **Inställningar → Enheter och tjänster → Lägg till integration**.
-3. Följ installationsflödet och kontrollera att nödvändiga integrationer och frontend-kort finns installerade.
-4. Lägg till följande under `homeassistant:` i `configuration.yaml`:
+3. Följ installationsflödet. Det kontrollerar att Nordpool, nödvändiga frontend-kort och SMHI finns tillgängliga och visar därefter YAML-konfigurationen som ska aktiveras.
+4. HACS installerar integrationen under `/config/custom_components/sem/`. SEM:s paketfiler, skript, datafiler och dashboard finns under `/config/custom_components/sem/resources/`. Installationen kopierar inte dessa filer till `/config/packages` eller `/config/dashboards`.
+5. Lägg till följande under `homeassistant:` i `configuration.yaml`:
 
 ```yaml
 homeassistant:
@@ -53,7 +54,7 @@ homeassistant:
 
 Om ett `homeassistant:`-block redan finns ska du lägga till `packages:` under det befintliga blocket, inte skapa ett till.
 
-5. Registrera SEM-dashboarden i `configuration.yaml`:
+6. Registrera SEM-dashboarden i `configuration.yaml`:
 
 ```yaml
 lovelace:
@@ -67,7 +68,7 @@ lovelace:
       filename: custom_components/sem/resources/dashboards/admin_view.yaml
 ```
 
-6. Kontrollera Home Assistant-konfigurationen och starta om Home Assistant.
+7. Kontrollera Home Assistant-konfigurationen och starta om Home Assistant.
 
 ### Uppdateringar
 
