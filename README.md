@@ -76,4 +76,10 @@ SEM laddar inte längre ner eller uppdaterar paketfiler separat från dashboarde
 
 ### Befintliga installationer
 
-Tidigare SEM-versioner kan ha kopierat paketfiler till `/config/packages/sem` och dashboarden till `/config/dashboards`. Kontrollera att de gamla kopiorna inte längre inkluderas i konfigurationen innan du byter till sökvägarna ovan. Ladda inte både de gamla och nya kopiorna parallellt. Säkerhetskopiera egna ändringar innan du tar bort eller arkiverar gamla kopior.
+Om du uppdaterar från en tidigare SEM-version behöver du först ändra länkarna i `configuration.yaml` så att de gamla filerna inte längre läses in.
+
+1. Ta bort eller ersätt den gamla paketsökvägen, exempelvis `!include_dir_named packages`.
+2. Ta bort eller ersätt den gamla dashboard-sökvägen, exempelvis `filename: dashboards/admin_view.yaml`.
+3. När de gamla sökvägarna är borttagna lägger du in de nya sökvägarna som visas i installationsanvisningarna ovan. De pekar på filerna som HACS har installerat under `custom_components/sem/resources/`.
+
+Det är viktigt att först ta bort de gamla länkarna och därefter aktivera de nya. Annars riskerar Home Assistant att läsa in både de gamla och nya paketfilerna parallellt. Säkerhetskopiera eventuella egna ändringar i de gamla filerna innan du tar bort eller arkiverar dem.
