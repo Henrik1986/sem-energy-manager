@@ -24,15 +24,9 @@ Nedanstående anläggningar är kopplade, men ännu inte fullt testade.
 - Solax - https://github.com/wills106/homeassistant-solax-modbus
 - Solis - https://github.com/wills106/homeassistant-solax-modbus
 
-### Huawei – kontrollera före installation av SEM
+### Huawei Solar
 
-Om du använder Huawei Solar ska sensorn **Rated Capacity** vara aktiverad i Home Assistant innan SEM installeras.
-
-Gör så här för varje batterienhet:
-1. Öppna **Inställningar → Enheter och tjänster → Huawei Solar**.
-2. Öppna batterienheten som heter **Batteries** eller **Connected energy storage**.
-3. Aktivera entiteten **Rated Capacity**.
-4. Kontrollera att sensorn visar batteriets nominella kapacitet i Wh.
+Om du använder Huawei Solar ska **Rated Capacity** vara aktiverad för varje batterienhet innan SEM installeras. [Läs instruktionerna för Huawei Solar](huawei.md).
 
 
 ## Installation
