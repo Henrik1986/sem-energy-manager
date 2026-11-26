@@ -52,6 +52,9 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({}),
+            description_placeholders={
+                "supported_systems_url": "https://github.com/Henrik1986/sem-energy-manager/tree/main"
+            },
         )
 
     # ─────────────────────────────
