@@ -2996,7 +2996,8 @@ automation:
                           {{ states('input_text.sem_ev_zaptec_current_entity_2') | trim != '' }}
                     then:
                       - action: number.set_value
-                        target:                          entity_id: >
+                        target:                          
+                          entity_id: >
                             {{ states('input_text.sem_ev_zaptec_current_entity_2') | trim }}
                         data:
                           value: 0
