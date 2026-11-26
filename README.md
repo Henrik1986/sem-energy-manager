@@ -70,6 +70,14 @@ lovelace:
 
 7. Kontrollera Home Assistant-konfigurationen och starta om Home Assistant.
 
+### Kom igång efter installationen
+
+När Home Assistant har startat om:
+
+1. Öppna dashboarden **Energisystem** via sidomenyn.
+2. På dashboardens hemvy klickar du på ikonen **Mitt system** i den övre raden.
+3. Klicka på **Konfigurera** och följ anvisningarna för att färdigställa systemets inställningar.
+
 ### Uppdateringar
 
 Integrationskoden, YAML-paketen, skripten, datafilerna och dashboarden levereras tillsammans i varje SEM-release. HACS installerar de uppdaterade filerna när integrationen uppdateras. Starta om Home Assistant efter uppdateringen så att de nya YAML-filerna läses in.
