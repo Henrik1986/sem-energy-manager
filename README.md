@@ -69,7 +69,7 @@ Integrationskoden, YAML-paketen, skripten, datafilerna och dashboarden levereras
 
 SEM laddar inte längre ner eller uppdaterar paketfiler separat från dashboarden.
 
-### Befintliga installationer
+### ⚠️ Befintliga installationer
 
 Om du uppdaterar från en tidigare SEM-version behöver du först ändra länkarna i `configuration.yaml` så att de gamla filerna inte längre läses in.
 
