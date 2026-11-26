@@ -1996,7 +1996,8 @@ automation:
     mode: restart
     triggers:
       - trigger: state
-        entity_id: input_button.sem_ev_charge_now    conditions:
+        entity_id: input_button.sem_ev_charge_now    
+    conditions:
       - condition: template
         value_template: >
           {% set user_code = states('input_text.sem_user_access_code') | trim %}
