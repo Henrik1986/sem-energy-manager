@@ -55,7 +55,7 @@ lovelace:
 
 7. Kontrollera Home Assistant-konfigurationen och starta om Home Assistant.
 
-### Kom igång efter installationen
+## Kom igång efter installationen
 
 När Home Assistant har startat om:
 
@@ -63,17 +63,17 @@ När Home Assistant har startat om:
 2. På dashboardens hemvy klickar du på ikonen **Mitt system** i den övre raden.
 3. Klicka på **Konfigurera** och följ anvisningarna för att färdigställa systemets inställningar.
 
-### Uppdateringar
+## Uppdateringar
 
 Integrationskoden, YAML-paketen, skripten, datafilerna och dashboarden levereras tillsammans i varje SEM-release. HACS installerar de uppdaterade filerna när integrationen uppdateras. Starta om Home Assistant efter uppdateringen så att de nya YAML-filerna läses in.
 
 SEM laddar inte längre ner eller uppdaterar paketfiler separat från dashboarden.
 
-### ⚠️ Befintliga installationer
+## ⚠️⚠️⚠️ Befintliga installationer från v.7.7.0 ⚠️⚠️⚠️
 
-Om du uppdaterar från en tidigare SEM-version behöver du först ändra länkarna i `configuration.yaml` så att de gamla filerna inte längre läses in.
+Om du uppdaterar från en tidigare SEM-version (v.7.7.0 eller nyare) behöver du först ändra länkarna i `configuration.yaml` så att de gamla filerna inte längre läses in.
 
-1. Ta bort eller ersätt den gamla paketsökvägen: `!include_dir_named packages`.
+1. Ta bort eller ersätt den gamla paketsökvägen: `!include_dir_named packages`. (Om du har egna paket behöver du manuellt ta bort mappen sem)
 2. Ta bort eller ersätt den gamla dashboard-sökvägen: `filename: dashboards/admin_view.yaml`.
 3. När de gamla sökvägarna är borttagna lägger du in de nya sökvägarna som visas i installationsanvisningarna ovan. De pekar på filernas nya plats `custom_components/sem/resources/`.
 
