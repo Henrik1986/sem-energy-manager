@@ -73,7 +73,7 @@ class SEMConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             if nordpool_ok
             else (
                 "🔴 Hittar ingen Nordpool integration\n\n\n"
-                "1. Hämta Nordpool via HACS och starta om Home Assistant.\n" 
+                "1. Hämta Nordpool via Marketplace (HACS) och starta om Home Assistant.\n" 
                 "2. Installera och konfiguera Nordpool integrationen i Home Assistant. Din sensor ska visa elpriset i SEK/kWh.\n"
                 "(Inställningar > Enheter & tjänster > Lägg till integration)\n"
                 "3. Starta om SEM-installationen för att fortsätta installationen.\n\n\n"
