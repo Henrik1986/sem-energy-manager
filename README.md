@@ -18,23 +18,18 @@ Designat för att ge högre självförsörjning, bättre ekonomi och full kontro
 Din anläggning måste vara integrerad med Home Assistant. 
 
 Anläggningar med fullt stöd
-- Huawei – https://github.com/wlcrs/huawei_solar
+- Huawei – https://github.com/wlcrs/huawei_solar ([Läs mer här](huawei.md)).
 
 Nedanstående anläggningar är kopplade, men ännu inte fullt testade. 
 - Solax - https://github.com/wills106/homeassistant-solax-modbus
 - Solis - https://github.com/wills106/homeassistant-solax-modbus
-
-### Huawei Solar
-
-Om du använder Huawei Solar ska **Rated Capacity** vara aktiverad för varje batterienhet innan SEM installeras. [Läs instruktionerna för Huawei Solar](huawei.md).
-
 
 ## Installation
 
 1. Installera **Smart Energy Manager (SEM)** via HACS.
 2. Starta om Home Assistant och lägg till SEM under **Inställningar → Enheter och tjänster → Lägg till integration**.
 3. Följ installationsflödet. Det kontrollerar att Nordpool, nödvändiga frontend-kort och SMHI finns tillgängliga och visar därefter YAML-konfigurationen som ska aktiveras.
-4. HACS installerar integrationen under `/config/custom_components/sem/`. SEM:s paketfiler, skript, datafiler och dashboard finns under `/config/custom_components/sem/resources/`. Installationen kopierar inte dessa filer till `/config/packages` eller `/config/dashboards`.
+4. HACS installerar integrationen under `/config/custom_components/sem/`. SEM:s paketfiler, skript, datafiler och dashboard finns under `/config/custom_components/sem/resources/`.
 5. Lägg till följande under `homeassistant:` i `configuration.yaml`:
 
 ```yaml
