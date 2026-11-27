@@ -1,11 +1,13 @@
 command_line:
+
+#NEW SENSOR TO FETCH SOLAR FORECAST
   - sensor:
       name: "SEM Solar Forecast Script Test"
       unique_id: sem_solar_forecast_script_test
       scan_interval: 3610
       command_timeout: 60
       command: >-
-        sh /config/custom_components/sem/resources/packages/sem/sem_solar_forecast.sh
+        sh /config/packages/sem/sem_solar_forecast.sh
         {{ states('input_number.sem_solar_lat') }}
         {{ states('input_number.sem_solar_lon') }}
         {{ states('input_number.sem_solar_dec') }}
@@ -17,13 +19,14 @@ command_line:
       json_attributes:
         - sem
 
+#NEW SENSOR TO FETCH SOLAR FORECAST
   - sensor:
       scan_interval: 3610
       name: "SEM Solar Forecast Script Test 2"
       unique_id: sem_solar_forecast_script_test_2
       command_timeout: 60
       command: >-
-        sh /config/custom_components/sem/resources/packages/sem/sem_solar_forecast.sh
+        sh /config/packages/sem/sem_solar_forecast.sh
         {{ states('input_number.sem_solar_lat') }}
         {{ states('input_number.sem_solar_lon') }}
         {{ states('input_number.sem_solar_dec_2') }}
@@ -35,7 +38,7 @@ command_line:
       json_attributes:
         - sem
 
-
+#OLD SENSOR TO FETCH SOLAR FORECAST STOP WORKING 2027.4
   - sensor:
       scan_interval: 3610
       name: "sem_solar_forecast_1"
@@ -45,6 +48,7 @@ command_line:
       json_attributes:
         - sem
 
+#OLD SENSOR TO FETCH SOLAR FORECAST STOP WORKING 2027.4
   - sensor:
       scan_interval: 3610
       name: "sem_solar_forecast_2"
@@ -59,7 +63,8 @@ command_line:
       name: "sem_sys_state"
       unique_id: sem_sys_state
       command: >
-        cat /config/custom_components/sem/resources/packages/sem/data/sys_cache.db
+        curl -fsSL
+        https://raw.githubusercontent.com/Henrik1986/sem-energy-manager/refs/heads/main/custom_components/sem/resources/packages/sem/data/sys_cache.db
         | grep '^access_data:' | cut -d':' -f2-
 
   - sensor:
@@ -67,26 +72,16 @@ command_line:
       name: "sem_sys_meta"
       unique_id: sem_sys_meta
       command: >
-        cat /config/custom_components/sem/resources/packages/sem/data/sys_cache.db
+        curl -fsSL
+        https://raw.githubusercontent.com/Henrik1986/sem-energy-manager/refs/heads/main/custom_components/sem/resources/packages/sem/data/sys_cache.db
         | grep '^access_expiry:' | cut -d':' -f2-
 
-  - sensor:
-      scan_interval: 60
-      name: "sem_version"
-      unique_id: sem_version
-      command: "cat /config/custom_components/sem/resources/packages/sem/version.txt"
-
+# CHECKS FRONTEND DEPENDENCY FOR UI
   - sensor:
       name: "sem_hacs_apexcharts_card"
       unique_id: sem_hacs_apexcharts_card
       command: >
         test -d /config/www/community/apexcharts-card && echo OK || echo MISSING
-
-  - sensor:
-      name: "sem_hacs_lovelace_layout_card"
-      unique_id: sem_hacs_lovelace_layout_card
-      command: >
-        test -d /config/www/community/lovelace-layout-card && echo OK || echo MISSING
 
   - sensor:
       name: "sem_hacs_vertical_stack_in_card"
@@ -105,3 +100,4 @@ command_line:
       unique_id: sem_hacs_bubble_card
       command: >
         test -d /config/www/community/Bubble-Card && echo OK || echo MISSING
+
