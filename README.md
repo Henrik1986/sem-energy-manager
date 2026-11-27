@@ -17,23 +17,64 @@ Designat för att ge högre självförsörjning, bättre ekonomi och full kontro
 ## Viktigt innan du börjar installationen
 Din anläggning måste vara integrerad med Home Assistant. 
 
-Systemet har stöd för
-- Huawei – https://github.com/wlcrs/huawei_solar
+Anläggningar med fullt stöd
+- Huawei – https://github.com/wlcrs/huawei_solar ([Läs mer här](huawei.md)).
 
-### Huawei – kontrollera före installation av SEM
+Nedanstående anläggningar är kopplade, men ännu inte fullt testade. 
+- Solax - https://github.com/wills106/homeassistant-solax-modbus
+- Solis - https://github.com/wills106/homeassistant-solax-modbus
 
-Om du använder Huawei Solar ska sensorn **Rated Capacity** vara aktiverad i Home Assistant innan SEM installeras.
+## Installation
 
-Gör så här för varje batterienhet:
-1. Öppna **Inställningar → Enheter och tjänster → Huawei Solar**.
-2. Öppna batterienheten som heter **Batteries** eller **Connected energy storage**.
-3. Aktivera entiteten **Rated Capacity**.
-4. Kontrollera att sensorn visar batteriets nominella kapacitet i Wh.
+1. Installera **Smart Energy Manager (SEM)** via HACS.
+2. Starta om Home Assistant och lägg till SEM under **Inställningar → Enheter och tjänster → Lägg till integration**.
+3. Följ installationsflödet. Det kontrollerar att Nordpool, nödvändiga frontend-kort och SMHI finns tillgängliga och visar därefter YAML-konfigurationen som ska aktiveras.
+4. HACS installerar integrationen under `/config/custom_components/sem/`. SEM:s paketfiler, skript, datafiler och dashboard finns under `/config/custom_components/sem/resources/`.
+5. Lägg till följande under `homeassistant:` i `configuration.yaml`:
 
-SEM använder denna kapacitet för att beräkna en korrekt kapacitetsviktad SOC när flera batterier finns. SEM aktiverar inte sensorn automatiskt. Om den saknas eller är inaktiverad visas ett installationsfel i SEM:s entitetsstatus.
+```yaml
+homeassistant:
+  packages: !include_dir_named custom_components/sem/resources/packages/sem
+```
 
-### Flera Huawei-växelriktare
+Om ett `homeassistant:`-block redan finns ska du lägga till `packages:` under det befintliga blocket, inte skapa ett till.
 
-SEM kan samla flera Huawei-växelriktare och batterier till en gemensam anläggning, både när de är kopplade via master/slav och när de är inlagda som separata Huawei Solar-anslutningar.
+6. Registrera SEM-dashboarden i `configuration.yaml`:
 
-I den här versionen behandlas samtliga aktiva Huawei Solar-anslutningar som en och samma SEM-anläggning. Använd därför inte denna funktion för två fristående Huawei-anläggningar.
+```yaml
+lovelace:
+  mode: storage
+  dashboards:
+    smart-energy-system:
+      mode: yaml
+      title: Energisystem
+      icon: mdi:dots-circle
+      show_in_sidebar: true
+      filename: custom_components/sem/resources/dashboards/admin_view.yaml
+```
+
+7. Kontrollera Home Assistant-konfigurationen och starta om Home Assistant.
+
+## Kom igång efter installationen
+
+När Home Assistant har startat om:
+
+1. Öppna dashboarden **Energisystem** via sidomenyn.
+2. På dashboardens hemvy klickar du på ikonen **Mitt system** i den övre raden.
+3. Klicka på **Konfigurera** och följ anvisningarna för att färdigställa systemets inställningar.
+
+## Uppdateringar
+
+Integrationskoden, YAML-paketen, skripten, datafilerna och dashboarden levereras tillsammans i varje SEM-release. HACS installerar de uppdaterade filerna när integrationen uppdateras. Starta om Home Assistant efter uppdateringen så att de nya YAML-filerna läses in.
+
+SEM laddar inte längre ner eller uppdaterar paketfiler separat från dashboarden.
+
+## ⚠️⚠️⚠️ Befintliga installationer från v.7.7.0 ⚠️⚠️⚠️
+
+Om du uppdaterar från en tidigare SEM-version (v.7.7.0 eller nyare) behöver du först ändra länkarna i `configuration.yaml` så att de gamla filerna inte längre läses in.
+
+1. Ta bort eller ersätt den gamla paketsökvägen: `!include_dir_named packages`. (Om du har egna paket behöver du manuellt ta bort mappen sem)
+2. Ta bort eller ersätt den gamla dashboard-sökvägen: `filename: dashboards/admin_view.yaml`.
+3. När de gamla sökvägarna är borttagna lägger du in de nya sökvägarna som visas i installationsanvisningarna ovan. De pekar på filernas nya plats `custom_components/sem/resources/`.
+
+Det är viktigt att först ta bort de gamla länkarna och därefter aktivera de nya. Annars riskerar Home Assistant att läsa in både de gamla och nya paketfilerna parallellt. Säkerhetskopiera eventuella egna ändringar i de gamla filerna innan du tar bort eller arkiverar dem.

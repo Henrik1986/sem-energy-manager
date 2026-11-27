@@ -336,4 +336,3 @@ utility_meter:
     source: sensor.sem_battery_to_house_energy
     cycle: daily
     unique_id: sem_battery_to_house_energy_daily
-    
