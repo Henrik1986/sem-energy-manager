@@ -71,7 +71,7 @@ input_boolean:
 
   sem_ev_charged_today:
     name: Ev charge
-  
+
   sem_submit_user_info: 
     name: "Send"
   
@@ -107,7 +107,7 @@ input_boolean:
 
   sem_smart_charge_ev: 
     name: Aktivera smartladdning av elbil
-
+    
   sem_battery_setup:
     name: Battery setup
     
@@ -132,6 +132,9 @@ input_boolean:
   sem_house_more_info:
     name: House more info
     
+  sem_update_notification: 
+    name: New Update Notify
+
   sem_ink_ev:
     name: Ink EV
 
