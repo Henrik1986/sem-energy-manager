@@ -77,9 +77,6 @@ input_boolean:
   
   sem_ev_integrated: 
     name: EV integrated
-
-  sem_more_info_system:
-    name: Mer information om systemetsdriftplan
   
   sem_activate_ai: 
     name: Aktivera AI-analys
